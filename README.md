@@ -4,7 +4,7 @@ Turn a business's paper documents into an archive it can search and ask question
 
 1. **Upload** scans or phone photos (PDF, JPG, PNG, HEIC, TIFF, WebP).
 2. **OCR** runs locally first. Weak scans can be re-read with Claude vision.
-3. **Filing**: each document gets a type, title, summary, date, counterparty, total
+3. **Filing**: each document gets a type, business area, subject, title, summary, date, counterparty, total
    and key fields, stored in Postgres next to the page text.
 4. **Ask**: Claude answers questions using search and lookup tools scoped to the
    organisation, and cites the page behind each fact.
@@ -42,6 +42,29 @@ make web                  # terminal 3, then open http://localhost:5173
 For a production-style run, `make build` and start `backend/server` from `backend/`;
 it serves the built web app on `:8080`. The OCR worker downloads its models
 (about 100 MB) on first use.
+
+## Scanning from a phone
+
+The web app has a phone layout with a **Scan** tab: take a photo of each page, and the
+pages are joined into one PDF document, then read and filed like any upload.
+
+On the desktop, **Documents → Scan with phone** shows a QR code for the server's
+local-network address. The phone must be on the same Wi-Fi and you sign in on it once.
+That address is plain HTTP, so it is for testing on a trusted network; scanning from
+anywhere needs the app hosted behind HTTPS. On macOS the firewall may ask to allow
+incoming connections for the server the first time.
+
+"Add to Home Screen" installs it as an app that opens straight on the Scan tab.
+
+## Classification
+
+Every document is filed with a **type** (invoice, receipt, contract, letter, form,
+report, other), the **business area** it relates to (purchases, sales, premises,
+banking, taxes, payroll and HR, insurance, legal, vehicles, IT and telecom,
+administration, other) and a one-line **subject**. With a Claude key this comes from
+Claude, which also sees the company name and business info so it can tell a purchase
+from a sale. Without a key, or if that call fails, type and area are guessed from
+keywords (Polish, English, German) and the document says so.
 
 ## OCR modes
 

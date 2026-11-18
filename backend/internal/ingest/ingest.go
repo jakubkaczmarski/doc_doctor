@@ -90,16 +90,29 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "No readable text was found in this file."))
 	}
 	if p.Claude == nil {
-		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "Text is searchable. Type, summary and fields were not extracted because no Claude API key is configured."))
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "Text is searchable. Summary and fields were not extracted because no Claude API key is configured."))
 	}
 
 	p.Store.SetStage(ctx, doc.ID, "analyzing")
-	analysis, err := p.Claude.Analyze(ctx, doc.Filename, full.String())
+	company, err := p.Store.OrgContext(ctx, doc.OrgID)
+	if err != nil {
+		return fmt.Errorf("load company info: %w", err)
+	}
+	analysis, err := p.Claude.Analyze(ctx, company, doc.Filename, full.String())
 	if err != nil {
 		// The text is already searchable; keep the document usable and surface the reason.
-		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "Metadata extraction failed: "+err.Error()))
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "Metadata extraction failed: "+err.Error()))
 	}
 	return p.Store.FinishDocument(ctx, doc.ID, analysis, notice)
+}
+
+// finishWithGuess files a document using the keyword classifier instead of Claude.
+func (p *Pipeline) finishWithGuess(ctx context.Context, doc store.Document, text, notice string) error {
+	g := guess(text)
+	if g == nil {
+		return p.Store.FinishDocument(ctx, doc.ID, nil, notice)
+	}
+	return p.Store.FinishDocument(ctx, doc.ID, g, appendNote(notice, "Type and business area were guessed from keywords."))
 }
 
 // ocr picks the engine: local first, Claude vision when requested or (in auto mode) when

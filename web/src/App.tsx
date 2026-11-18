@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
-import { Building2, FileStack, LogOut, MessagesSquare } from 'lucide-react'
+import { Building2, Camera, FileStack, LogOut, MessagesSquare } from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider, useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,14 @@ import DocumentsPage from '@/pages/Documents'
 import DocumentPage from '@/pages/Document'
 import AskPage from '@/pages/Ask'
 import BusinessPage from '@/pages/Business'
+import ScanPage from '@/pages/Scan'
+
+const NAV = [
+  { to: '/documents', label: 'Documents', short: 'Documents', icon: FileStack },
+  { to: '/scan', label: 'Scan', short: 'Scan', icon: Camera },
+  { to: '/ask', label: 'Ask', short: 'Ask', icon: MessagesSquare },
+  { to: '/business', label: 'Business info', short: 'Info', icon: Building2 },
+]
 
 function Shell() {
   const { user, capabilities, loading, signOut } = useSession()
@@ -19,31 +27,32 @@ function Shell() {
       'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
       isActive ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
     )
+  const tab = ({ isActive }: { isActive: boolean }) =>
+    cn(
+      'flex flex-1 flex-col items-center gap-0.5 py-2 text-[0.6875rem] font-medium',
+      isActive ? 'text-primary' : 'text-muted-foreground',
+    )
 
   return (
-    <div className="flex min-h-dvh flex-col md:flex-row">
-      <aside className="flex shrink-0 items-center gap-1 border-b bg-card px-3 py-2 md:w-56 md:flex-col md:items-stretch md:border-r md:border-b-0 md:px-3 md:py-5">
-        <div className="mr-3 md:mr-0 md:mb-6 md:px-3">
+    <div className="flex h-dvh flex-col md:flex-row">
+      {/* Desktop: sidebar */}
+      <aside className="hidden w-56 shrink-0 flex-col border-r bg-card px-3 py-5 md:flex">
+        <div className="mb-6 px-3">
           <div className="text-base font-semibold tracking-tight">Doc Doctor</div>
-          <div className="hidden truncate text-xs text-muted-foreground md:block" title={user.org_name}>
+          <div className="truncate text-xs text-muted-foreground" title={user.org_name}>
             {user.org_name}
           </div>
         </div>
-        <nav className="flex gap-1 md:flex-col" aria-label="Main">
-          <NavLink to="/documents" className={link}>
-            <FileStack className="size-4" aria-hidden /> Documents
-          </NavLink>
-          <NavLink to="/ask" className={link}>
-            <MessagesSquare className="size-4" aria-hidden /> Ask
-          </NavLink>
-          <NavLink to="/business" className={link}>
-            <Building2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Business info</span>
-            <span className="sm:hidden">Info</span>
-          </NavLink>
+        <nav className="flex flex-col gap-1" aria-label="Main">
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink key={to} to={to} className={link}>
+              <Icon className="size-4" aria-hidden /> {label}
+            </NavLink>
+          ))}
         </nav>
-        <div className="ml-auto md:mt-auto md:ml-0">
+        <div className="mt-auto">
           {capabilities && (!capabilities.claude || !capabilities.local_ocr) && (
-            <div className="mb-3 hidden rounded-md border border-dashed px-3 py-2 text-xs leading-relaxed text-muted-foreground md:block">
+            <div className="mb-3 rounded-md border border-dashed px-3 py-2 text-xs leading-relaxed text-muted-foreground">
               {!capabilities.local_ocr && <p>Local OCR worker is not running, so new uploads will wait or fail.</p>}
               {!capabilities.claude && (
                 <p>No Claude API key is set. Search works; questions, summaries and Claude vision are off.</p>
@@ -54,14 +63,41 @@ function Shell() {
             onClick={() => void signOut()}
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <LogOut className="size-4" aria-hidden />
-            <span className="hidden sm:inline">Sign out</span>
+            <LogOut className="size-4" aria-hidden /> Sign out
           </button>
         </div>
       </aside>
-      <main className="min-w-0 flex-1">
+
+      {/* Phone: slim header, content, bottom tab bar */}
+      <header className="flex shrink-0 items-center justify-between border-b bg-card px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
+        <div className="min-w-0">
+          <span className="font-semibold tracking-tight">Doc Doctor</span>
+          <span className="ml-2 truncate text-xs text-muted-foreground">{user.org_name}</span>
+        </div>
+        <button
+          onClick={() => void signOut()}
+          aria-label="Sign out"
+          className="rounded-md p-2 text-muted-foreground hover:bg-muted"
+        >
+          <LogOut className="size-4" />
+        </button>
+      </header>
+
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
+
+      <nav
+        className="flex shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
+        aria-label="Main"
+      >
+        {NAV.map(({ to, short, icon: Icon }) => (
+          <NavLink key={to} to={to} className={tab}>
+            <Icon className="size-5" aria-hidden />
+            {short}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }
@@ -79,6 +115,7 @@ export default function App() {
             <Route path="/ask" element={<AskPage />} />
             <Route path="/ask/:id" element={<AskPage />} />
             <Route path="/business" element={<BusinessPage />} />
+            <Route path="/scan" element={<ScanPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/documents" replace />} />
         </Routes>

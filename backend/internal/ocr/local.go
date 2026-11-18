@@ -30,14 +30,26 @@ type Result struct {
 	WeakRatio  float32 // share of the text in lines the recogniser was unsure about
 }
 
+// File is one named upload passed to the worker.
+type File struct {
+	Name string
+	Data []byte
+}
+
 func (l *Local) post(ctx context.Context, path, filename string, data []byte) (*http.Response, error) {
+	return l.postFiles(ctx, path, "file", []File{{Name: filename, Data: data}})
+}
+
+func (l *Local) postFiles(ctx context.Context, path, field string, files []File) (*http.Response, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	part, err := w.CreateFormFile("file", filename)
-	if err != nil {
-		return nil, err
+	for _, f := range files {
+		part, err := w.CreateFormFile(field, f.Name)
+		if err != nil {
+			return nil, err
+		}
+		part.Write(f.Data)
 	}
-	part.Write(data)
 	w.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.URL+path, &buf)
 	if err != nil {
@@ -98,6 +110,16 @@ func (l *Local) ToJPEG(ctx context.Context, filename string, data []byte) ([]byt
 // Preview renders one page of a PDF or image as a JPEG for the document viewer.
 func (l *Local) Preview(ctx context.Context, filename string, data []byte, page int) ([]byte, error) {
 	resp, err := l.post(ctx, fmt.Sprintf("/preview?page=%d", page), filename, data)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// Combine joins page photos, in order, into one multi-page PDF.
+func (l *Local) Combine(ctx context.Context, pages []File) ([]byte, error) {
+	resp, err := l.postFiles(ctx, "/combine", "files", pages)
 	if err != nil {
 		return nil, err
 	}

@@ -168,7 +168,9 @@ const analyzePrompt = `You are indexing a scanned business document for a compan
 The OCR text is below; it may contain recognition errors. Extract the metadata.
 
 Guidance:
-- doc_type: invoice, receipt, contract, letter, form, report, or other.
+- doc_type: what kind of document it is: invoice, receipt, contract, letter, form, report, or other.
+- category: the area of the business it relates to. purchases (things the company buys: supplier invoices, receipts, orders), sales (things it sells: its own invoices, customer orders, quotes), premises (rent, lease, utilities, building matters), banking (accounts, loans, statements, leasing), taxes (tax office, VAT, social insurance filings and correspondence), payroll_hr (employment contracts, payslips, leave, staff matters), insurance, legal (disputes, court, powers of attorney, company registry), vehicles, it_telecom (software, hardware, phone, internet), administration (permits, official notices, general office paperwork), or other. Use the company context to tell purchases from sales: an invoice issued by the company is sales, one addressed to it is purchases.
+- subject: one short phrase, in the document's language, saying what it is about, specific enough to tell it from similar documents (e.g. "Najem biura, ul. Świętojańska 4" or "Paper and toner, October order"). No more than about 8 words.
 - title: a short specific title a person would recognise in a list, in the document's language (e.g. "Invoice FV/2026/031 – Acme Sp. z o.o.").
 - summary: 2-4 sentences covering what the document is, who it involves and anything that matters (amounts, deadlines, obligations).
 - language: ISO 639-1 code of the main language.
@@ -181,9 +183,11 @@ Guidance:
 var analysisSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
-  "required": ["doc_type","title","summary","language","doc_date","counterparty","total_amount","currency","tags","fields"],
+  "required": ["doc_type","category","subject","title","summary","language","doc_date","counterparty","total_amount","currency","tags","fields"],
   "properties": {
     "doc_type": {"type": "string", "enum": ["invoice","receipt","contract","letter","form","report","other"]},
+    "category": {"type": "string", "enum": ["purchases","sales","premises","banking","taxes","payroll_hr","insurance","legal","vehicles","it_telecom","administration","other"]},
+    "subject": {"type": "string"},
     "title": {"type": "string"},
     "summary": {"type": "string"},
     "language": {"type": "string"},
@@ -200,7 +204,10 @@ var analysisSchema = json.RawMessage(`{
 }`)
 
 // Analyze extracts archive metadata from OCR text using structured output.
-func (c *Client) Analyze(ctx context.Context, filename, fullText string) (*store.Analysis, error) {
+//
+// company is the archive owner's name and profile, so the model can tell which party
+// "we" are (who the counterparty is, and whether an invoice is a purchase or a sale).
+func (c *Client) Analyze(ctx context.Context, company, filename, fullText string) (*store.Analysis, error) {
 	body := fullText
 	if r := []rune(body); len(r) > MaxAnalyzeChars {
 		half := MaxAnalyzeChars / 2
@@ -210,7 +217,7 @@ func (c *Client) Analyze(ctx context.Context, filename, fullText string) (*store
 	p.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: analysisSchema}
 	p.Messages = []anthropic.BetaMessageParam{
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(
-			analyzePrompt + "\n\nFile name: " + filename + "\n\n<document>\n" + body + "\n</document>")),
+			analyzePrompt + "\n\n<company>\n" + company + "\n</company>\n\nFile name: " + filename + "\n\n<document>\n" + body + "\n</document>")),
 	}
 	msg, err := c.stream(ctx, p)
 	if err != nil {

@@ -279,3 +279,21 @@ def preview(page: int = 1, file: UploadFile = File(...)):
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=82)
     return Response(buf.getvalue(), media_type="image/jpeg")
+
+
+@app.post("/combine")
+def combine(files: list[UploadFile] = File(...)):
+    """Join photos of consecutive pages into one multi-page PDF (one image per page)."""
+    pages: list[Image.Image] = []
+    try:
+        for upload in files:
+            for frame in open_image(upload.file.read()):
+                pages.append(prepare(frame))
+    except Exception as exc:
+        raise HTTPException(422, f"could not read image: {exc}") from exc
+    if not pages:
+        raise HTTPException(400, "no pages")
+    buf = io.BytesIO()
+    # resolution=200 matches RENDER_DPI, so OCR later sees each photo at its own pixel size.
+    pages[0].save(buf, "PDF", save_all=True, append_images=pages[1:], resolution=RENDER_DPI, quality=88)
+    return Response(buf.getvalue(), media_type="application/pdf")

@@ -77,6 +77,7 @@ var docTypeProp = map[string]any{"type": "string", "enum": []string{"invoice", "
 var filterProps = map[string]any{
 	"text":         strDesc("Substring matched against title, file name, counterparty, summary and tags."),
 	"doc_type":     docTypeProp,
+	"category":     map[string]any{"type": "string", "description": "Business area the document relates to.", "enum": []string{"purchases", "sales", "premises", "banking", "taxes", "payroll_hr", "insurance", "legal", "vehicles", "it_telecom", "administration", "other"}},
 	"counterparty": strDesc("Substring of the counterparty name (vendor, other contract party, sender)."),
 	"date_from":    strDesc("Earliest document date, YYYY-MM-DD."),
 	"date_to":      strDesc("Latest document date, YYYY-MM-DD."),
@@ -110,11 +111,11 @@ var tools = []anthropic.BetaToolUnionParam{
 			"to_page":     intDesc("Last page to read (default: last page)."),
 		}, "document_id"),
 	tool("list_documents",
-		"List documents with their extracted metadata: id, type, title, date, counterparty, total amount, currency, tags and summary. Covers the whole archive and supports filters. Use it to enumerate documents of a kind or period.",
+		"List documents with their extracted metadata: id, type, business area (category), subject, title, date, counterparty, total amount, currency, tags and summary. Covers the whole archive and supports filters. Use it to enumerate documents of a kind or period.",
 		withProps(map[string]any{"limit": intDesc("Maximum documents to return (default 50, max 200).")})),
 	tool("aggregate_documents",
 		"Count documents and sum their total amounts, grouped by one dimension, with the same filters as list_documents. Totals are computed in the database over every matching document and are reported per currency. Use it for spend per vendor, volume per month and similar questions.",
-		withProps(map[string]any{"group_by": map[string]any{"type": "string", "enum": []string{"counterparty", "doc_type", "month", "year", "none"}}}), "group_by"),
+		withProps(map[string]any{"group_by": map[string]any{"type": "string", "enum": []string{"counterparty", "doc_type", "category", "month", "year", "none"}}}), "group_by"),
 }
 
 const maxToolChars = 60_000
@@ -131,6 +132,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 	var in struct {
 		Query        string `json:"query"`
 		DocType      string `json:"doc_type"`
+		Category     string `json:"category"`
 		DocumentID   int64  `json:"document_id"`
 		Limit        int    `json:"limit"`
 		FromPage     int    `json:"from_page"`
@@ -151,7 +153,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 			}
 		}
 	}
-	filter := store.DocFilter{Text: in.Text, DocType: in.DocType, Counterparty: in.Counterparty, DateFrom: in.DateFrom, DateTo: in.DateTo, Status: "ready"}
+	filter := store.DocFilter{Text: in.Text, DocType: in.DocType, Category: in.Category, Counterparty: in.Counterparty, DateFrom: in.DateFrom, DateTo: in.DateTo, Status: "ready"}
 
 	switch name {
 	case "search_pages":
@@ -208,7 +210,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 			r.seen[d.ID] = d.Title
 			r.pages[[2]int64{d.ID, 1}] = true // metadata rows are cited as page 1
 			rows = append(rows, map[string]any{
-				"id": d.ID, "doc_type": d.DocType, "title": d.Title, "doc_date": d.DocDate, "counterparty": d.Counterparty,
+				"id": d.ID, "doc_type": d.DocType, "category": d.Category, "subject": d.Subject, "title": d.Title, "doc_date": d.DocDate, "counterparty": d.Counterparty,
 				"total_amount": d.TotalAmount, "currency": d.Currency, "tags": d.Tags, "pages": d.PageCount, "summary": d.Summary,
 			})
 		}

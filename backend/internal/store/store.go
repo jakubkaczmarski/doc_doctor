@@ -140,6 +140,18 @@ func (s *Store) OrgProfile(ctx context.Context, orgID int64) (string, error) {
 	return profile, err
 }
 
+// OrgContext describes the archive owner for document classification.
+func (s *Store) OrgContext(ctx context.Context, orgID int64) (string, error) {
+	var name, profile string
+	if err := s.DB.QueryRow(ctx, `SELECT name, profile FROM orgs WHERE id=$1`, orgID).Scan(&name, &profile); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(profile) == "" {
+		return "Archive owner: " + name, nil
+	}
+	return "Archive owner: " + name + "\n" + strings.TrimSpace(profile), nil
+}
+
 func (s *Store) SetOrgProfile(ctx context.Context, orgID int64, profile string) error {
 	_, err := s.DB.Exec(ctx, `UPDATE orgs SET profile=$2 WHERE id=$1`, orgID, profile)
 	return err
@@ -169,6 +181,8 @@ type Document struct {
 	OCRConfidence *float32   `json:"ocr_confidence"`
 	PageCount     int        `json:"page_count"`
 	DocType       string     `json:"doc_type"`
+	Category      string     `json:"category"`
+	Subject       string     `json:"subject"`
 	Title         string     `json:"title"`
 	Summary       string     `json:"summary"`
 	Language      string     `json:"language"`
@@ -183,13 +197,13 @@ type Document struct {
 }
 
 const docCols = `id, org_id, filename, mime, size_bytes, sha256, storage_key, status, stage, error, notice,
-	ocr_request, ocr_engine, ocr_confidence, page_count, doc_type, title, summary, language,
+	ocr_request, ocr_engine, ocr_confidence, page_count, doc_type, category, subject, title, summary, language,
 	to_char(doc_date, 'YYYY-MM-DD'), counterparty, total_amount::float8, currency, tags, fields, created_at, processed_at`
 
 func scanDoc(row pgx.Row) (Document, error) {
 	var d Document
 	err := row.Scan(&d.ID, &d.OrgID, &d.Filename, &d.Mime, &d.SizeBytes, &d.SHA256, &d.StorageKey, &d.Status, &d.Stage, &d.Error, &d.Notice,
-		&d.OCRRequest, &d.OCREngine, &d.OCRConfidence, &d.PageCount, &d.DocType, &d.Title, &d.Summary, &d.Language,
+		&d.OCRRequest, &d.OCREngine, &d.OCRConfidence, &d.PageCount, &d.DocType, &d.Category, &d.Subject, &d.Title, &d.Summary, &d.Language,
 		&d.DocDate, &d.Counterparty, &d.TotalAmount, &d.Currency, &d.Tags, &d.Fields, &d.CreatedAt, &d.ProcessedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
@@ -231,6 +245,7 @@ func (s *Store) DeleteDocument(ctx context.Context, orgID, id int64) (Document, 
 type DocFilter struct {
 	Text         string // matches title, filename, counterparty, summary, tags
 	DocType      string
+	Category     string
 	Counterparty string
 	DateFrom     string // YYYY-MM-DD
 	DateTo       string
@@ -246,10 +261,13 @@ func (f DocFilter) where(orgID int64) (string, []any) {
 		conds = append(conds, strings.ReplaceAll(cond, "?", fmt.Sprintf("$%d", len(args))))
 	}
 	if f.Text != "" {
-		add(`(unaccent(title) ILIKE unaccent(?) OR unaccent(filename) ILIKE unaccent(?) OR unaccent(counterparty) ILIKE unaccent(?) OR unaccent(summary) ILIKE unaccent(?) OR unaccent(array_to_string(tags, ' ')) ILIKE unaccent(?))`, "%"+f.Text+"%")
+		add(`(unaccent(title) ILIKE unaccent(?) OR unaccent(filename) ILIKE unaccent(?) OR unaccent(counterparty) ILIKE unaccent(?) OR unaccent(summary) ILIKE unaccent(?) OR unaccent(subject) ILIKE unaccent(?) OR category ILIKE ? OR unaccent(array_to_string(tags, ' ')) ILIKE unaccent(?))`, "%"+f.Text+"%")
 	}
 	if f.DocType != "" {
 		add(`doc_type = ?`, f.DocType)
+	}
+	if f.Category != "" {
+		add(`category = ?`, f.Category)
 	}
 	if f.Counterparty != "" {
 		add(`unaccent(counterparty) ILIKE unaccent(?)`, "%"+f.Counterparty+"%")
@@ -301,12 +319,13 @@ func (s *Store) Aggregate(ctx context.Context, orgID int64, groupBy string, f Do
 	expr := map[string]string{
 		"counterparty": "counterparty",
 		"doc_type":     "doc_type",
+		"category":     "category",
 		"month":        "coalesce(to_char(doc_date, 'YYYY-MM'), 'undated')",
 		"year":         "coalesce(to_char(doc_date, 'YYYY'), 'undated')",
 		"none":         "'all'",
 	}[groupBy]
 	if expr == "" {
-		return nil, fmt.Errorf("group_by must be one of counterparty, doc_type, month, year, none")
+		return nil, fmt.Errorf("group_by must be one of counterparty, doc_type, category, month, year, none")
 	}
 	where, args := f.where(orgID)
 	rows, err := s.DB.Query(ctx, `SELECT `+expr+` AS g, currency, count(*), sum(total_amount)::float8
@@ -408,6 +427,8 @@ func (s *Store) ReplacePages(ctx context.Context, d Document, pages []Page, engi
 // Analysis is the metadata extracted from a document's text.
 type Analysis struct {
 	DocType      string   `json:"doc_type"`
+	Category     string   `json:"category"`
+	Subject      string   `json:"subject"`
 	Title        string   `json:"title"`
 	Summary      string   `json:"summary"`
 	Language     string   `json:"language"`
@@ -436,8 +457,8 @@ func (s *Store) FinishDocument(ctx context.Context, id int64, a *Analysis, notic
 	}
 	_, err := s.DB.Exec(ctx, `UPDATE documents SET status='ready', stage='', notice=$2, processed_at=now(), updated_at=now(),
 		doc_type=$3, title=CASE WHEN $4='' THEN filename ELSE $4 END, summary=$5, language=$6, doc_date=$7::date,
-		counterparty=$8, total_amount=$9, currency=$10, tags=$11, fields=$12 WHERE id=$1`,
-		id, notice, a.DocType, a.Title, a.Summary, a.Language, date, a.Counterparty, a.TotalAmount, strings.ToUpper(a.Currency), a.Tags, a.Fields)
+		counterparty=$8, total_amount=$9, currency=$10, tags=$11, fields=$12, category=$13, subject=$14 WHERE id=$1`,
+		id, notice, a.DocType, a.Title, a.Summary, a.Language, date, a.Counterparty, a.TotalAmount, strings.ToUpper(a.Currency), a.Tags, a.Fields, a.Category, a.Subject)
 	return err
 }
 

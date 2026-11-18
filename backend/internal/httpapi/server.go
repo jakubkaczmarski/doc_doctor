@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/mail"
 	"os"
@@ -26,6 +28,7 @@ import (
 	"docdoctor/internal/chat"
 	"docdoctor/internal/config"
 	"docdoctor/internal/ingest"
+	"docdoctor/internal/ocr"
 	"docdoctor/internal/store"
 )
 
@@ -33,6 +36,7 @@ const (
 	cookieName    = "dd_session"
 	sessionTTL    = 30 * 24 * time.Hour
 	maxUploadSize = 50 << 20 // per file
+	maxScanPages  = 40       // photos that can be joined into one scanned document
 )
 
 type Server struct {
@@ -257,6 +261,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			"local_ocr": s.Pipeline.Local.Healthy(r.Context()),
 			"ocr_mode":  s.Cfg.OCRMode,
 			"model":     s.Cfg.Model,
+			"lan_urls":  s.lanURLs(),
 		},
 	})
 }
@@ -314,7 +319,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listDocuments(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	docs, err := s.Store.ListDocuments(r.Context(), userFrom(r).OrgID, store.DocFilter{
-		Text: strings.TrimSpace(q.Get("q")), DocType: q.Get("type"), Status: q.Get("status"),
+		Text: strings.TrimSpace(q.Get("q")), DocType: q.Get("type"), Category: q.Get("category"), Status: q.Get("status"),
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -331,6 +336,10 @@ type uploadResult struct {
 }
 
 // upload accepts one or more files in the "files" multipart field and queues them.
+//
+// With the field combine=1 (sent before the files), the files are treated as photos of
+// consecutive pages and stored as a single PDF document, named by the optional "name"
+// field. This is what the phone Scan screen uses.
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	mr, err := r.MultipartReader()
@@ -339,6 +348,8 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ocrRequest := ""
+	combine, scanName := false, ""
+	var scanPages []ocr.File
 	results := []uploadResult{}
 	for {
 		part, err := mr.NextPart()
@@ -356,10 +367,37 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		if part.FormName() == "combine" {
+			b, _ := io.ReadAll(io.LimitReader(part, 8))
+			combine = string(b) == "1"
+			continue
+		}
+		if part.FormName() == "name" {
+			b, _ := io.ReadAll(io.LimitReader(part, 200))
+			scanName = strings.TrimSpace(string(b))
+			continue
+		}
 		if part.FormName() != "files" || part.FileName() == "" {
 			continue
 		}
 		name := filepath.Base(part.FileName())
+		if combine {
+			if mime := allowedTypes[strings.ToLower(filepath.Ext(name))]; !strings.HasPrefix(mime, "image/") {
+				writeErr(w, http.StatusBadRequest, "Only photos can be joined into one scan.")
+				return
+			}
+			if len(scanPages) == maxScanPages {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("A scan can have at most %d pages.", maxScanPages))
+				return
+			}
+			data, err := io.ReadAll(io.LimitReader(part, maxUploadSize+1))
+			if err != nil || len(data) > maxUploadSize {
+				writeErr(w, http.StatusBadRequest, "A page photo is too large or the upload was interrupted.")
+				return
+			}
+			scanPages = append(scanPages, ocr.File{Name: name, Data: data})
+			continue
+		}
 		res := uploadResult{Filename: name}
 		doc, created, err := s.saveUpload(r.Context(), u, name, part, ocrRequest)
 		switch {
@@ -370,7 +408,60 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, res)
 	}
+	if combine {
+		if len(scanPages) == 0 {
+			writeErr(w, http.StatusBadRequest, "No pages were uploaded.")
+			return
+		}
+		pdf, err := s.Pipeline.Local.Combine(r.Context(), scanPages)
+		if err != nil {
+			log.Printf("combine scan: %v", err)
+			writeErr(w, http.StatusBadGateway, "Could not assemble the scan. Is the OCR worker running?")
+			return
+		}
+		name := safeScanName(scanName)
+		res := uploadResult{Filename: name}
+		if doc, created, err := s.saveUpload(r.Context(), u, name, bytes.NewReader(pdf), ocrRequest); err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Document, res.Duplicate = &doc, !created
+		}
+		results = append(results, res)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// safeScanName turns a user-supplied scan title into a PDF file name.
+func safeScanName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r < 32 {
+			return ' '
+		}
+		return r
+	}, name)
+	name = strings.TrimSpace(strings.TrimSuffix(name, ".pdf"))
+	if name == "" {
+		name = "Scan " + time.Now().Format("2006-01-02 15.04")
+	}
+	return name + ".pdf"
+}
+
+// lanURLs lists addresses other devices on the local network can use to reach this server.
+func (s *Server) lanURLs() []string {
+	_, port, err := net.SplitHostPort(s.Cfg.Addr)
+	if err != nil {
+		return nil
+	}
+	addrs, _ := net.InterfaceAddrs()
+	urls := []string{}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() || ipnet.IP.To4() == nil || !ipnet.IP.IsPrivate() {
+			continue
+		}
+		urls = append(urls, "http://"+net.JoinHostPort(ipnet.IP.String(), port))
+	}
+	return urls
 }
 
 func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src io.Reader, ocrRequest string) (store.Document, bool, error) {

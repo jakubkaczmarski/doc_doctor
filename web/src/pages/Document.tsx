@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { ArrowLeft, Download, ScanText, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusMark } from '@/components/StatusMark'
-import { api, engineLabel, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
+import { api, categoryLabel, engineLabel, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
 import { useSession } from '@/lib/session'
 
 export default function DocumentPage() {
@@ -78,6 +78,8 @@ export default function DocumentPage() {
   const fileUrl = `/api/documents/${doc.id}/file`
   const facts: [string, string][] = [
     ['Type', typeLabel(doc.doc_type)],
+    ['Relates to', categoryLabel(doc.category)],
+    ['About', doc.subject],
     ['Dated', formatDate(doc.doc_date)],
     ['Counterparty', doc.counterparty],
     ['Amount', formatAmount(doc.total_amount, doc.currency)],
@@ -85,7 +87,7 @@ export default function DocumentPage() {
   ].filter(([, v]) => v) as [string, string][]
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-card px-5 py-3 md:px-8">
         <Link to="/documents" aria-label="Back to documents" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted">
           <ArrowLeft className="size-4" />

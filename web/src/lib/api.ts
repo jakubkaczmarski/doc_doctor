@@ -1,6 +1,13 @@
 export type User = { id: number; org_id: number; email: string; org_name: string }
 
-export type Capabilities = { claude: boolean; local_ocr: boolean; ocr_mode: string; model: string }
+export type Capabilities = {
+  claude: boolean
+  local_ocr: boolean
+  ocr_mode: string
+  model: string
+  /** Addresses a phone on the same network can use to reach this server. */
+  lan_urls: string[]
+}
 
 export type Field = { name: string; value: string }
 
@@ -17,6 +24,10 @@ export type Doc = {
   ocr_confidence: number | null
   page_count: number
   doc_type: string
+  /** Business area the document relates to. */
+  category: string
+  /** One short line saying what it is about. */
+  subject: string
   title: string
   summary: string
   language: string
@@ -99,8 +110,10 @@ export const api = {
     request<User>('/auth/register', json({ org_name, email, password })),
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
-  documents: (q = '', type = '') =>
-    request<{ documents: Doc[] }>(`/documents?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`),
+  documents: (q = '', type = '', category = '') =>
+    request<{ documents: Doc[] }>(
+      `/documents?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&category=${encodeURIComponent(category)}`,
+    ),
   document: (id: number) => request<{ document: Doc; pages: Page[] }>(`/documents/${id}`),
   deleteDocument: (id: number) => request<{ ok: boolean }>(`/documents/${id}`, { method: 'DELETE' }),
   reprocess: (id: number, ocr: 'local' | 'claude' | 'auto') =>
@@ -108,6 +121,14 @@ export const api = {
   upload: (files: File[]) => {
     const form = new FormData()
     files.forEach((f) => form.append('files', f))
+    return request<{ results: UploadResult[] }>('/documents', { method: 'POST', body: form })
+  },
+  /** Uploads page photos, in order, as one multi-page document. */
+  uploadScan: (pages: File[], name: string) => {
+    const form = new FormData()
+    form.append('combine', '1') // must precede the files
+    form.append('name', name)
+    pages.forEach((f) => form.append('files', f))
     return request<{ results: UploadResult[] }>('/documents', { method: 'POST', body: form })
   },
   search: (q: string) => request<{ hits: Hit[] }>(`/search?q=${encodeURIComponent(q)}`),
@@ -169,6 +190,25 @@ export async function streamChat(
 }
 
 export const docTypes = ['invoice', 'receipt', 'contract', 'letter', 'form', 'report', 'other'] as const
+
+export const categories: Record<string, string> = {
+  purchases: 'Purchases',
+  sales: 'Sales',
+  premises: 'Premises',
+  banking: 'Banking',
+  taxes: 'Taxes',
+  payroll_hr: 'Payroll and HR',
+  insurance: 'Insurance',
+  legal: 'Legal',
+  vehicles: 'Vehicles',
+  it_telecom: 'IT and telecom',
+  administration: 'Administration',
+  other: 'Other',
+}
+
+export function categoryLabel(c: string) {
+  return categories[c] ?? ''
+}
 
 export function typeLabel(t: string) {
   return t === 'unknown' ? 'Unsorted' : t.charAt(0).toUpperCase() + t.slice(1)

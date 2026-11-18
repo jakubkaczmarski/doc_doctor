@@ -120,7 +120,7 @@ export default function AskPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3.25rem)] md:h-dvh">
+    <div className="flex h-full">
       {/* Past conversations */}
       <aside className="hidden w-60 shrink-0 flex-col border-r bg-card lg:flex">
         <div className="p-3">

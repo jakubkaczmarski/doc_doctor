@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Loader2, Search, Upload } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import { Loader2, Search, Smartphone, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Marked } from '@/components/Marked'
 import { StatusMark } from '@/components/StatusMark'
-import { api, docTypes, formatAmount, formatDate, typeLabel, type Doc, type Hit } from '@/lib/api'
+import { api, categories, categoryLabel, docTypes, formatAmount, formatDate, typeLabel, type Doc, type Hit } from '@/lib/api'
+import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.bmp,.heic,.heif'
@@ -16,6 +19,9 @@ export default function DocumentsPage() {
   const [hits, setHits] = useState<Hit[]>([])
   const [query, setQuery] = useState('')
   const [type, setType] = useState('')
+  const [category, setCategory] = useState('')
+  const [phoneOpen, setPhoneOpen] = useState(false)
+  const { capabilities } = useSession()
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -25,7 +31,7 @@ export default function DocumentsPage() {
     try {
       const q = query.trim()
       const [list, found] = await Promise.all([
-        api.documents(q, type),
+        api.documents(q, type, category),
         q.length >= 2 ? api.search(q) : Promise.resolve({ hits: [] as Hit[] }),
       ])
       setDocs(list.documents)
@@ -33,7 +39,7 @@ export default function DocumentsPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not load documents.')
     }
-  }, [query, type])
+  }, [query, type, category])
 
   // Debounced reload on filter change.
   useEffect(() => {
@@ -74,12 +80,13 @@ export default function DocumentsPage() {
     void upload(Array.from(e.dataTransfer.files))
   }
 
-  const filtering = query.trim() !== '' || type !== ''
+  const filtering = query.trim() !== '' || type !== '' || category !== ''
+  const phoneUrl = capabilities?.lan_urls?.[0] ? capabilities.lan_urls[0] + '/scan' : ''
   const empty = docs !== null && docs.length === 0 && hits.length === 0
 
   return (
     <div
-      className="relative min-h-dvh px-5 py-6 md:px-10 md:py-8"
+      className="relative min-h-full px-5 py-6 md:px-10 md:py-8"
       onDragEnter={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return
         dragDepth.current += 1
@@ -117,13 +124,16 @@ export default function DocumentsPage() {
             className="bg-card pl-8"
           />
         </div>
+        <Button variant="outline" className="hidden md:inline-flex" onClick={() => setPhoneOpen(true)}>
+          <Smartphone aria-hidden /> Scan with phone
+        </Button>
         <Button onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
           {uploading > 0 ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
           {uploading > 0 ? `Uploading ${uploading}` : 'Upload scans'}
         </Button>
       </header>
 
-      <div className="mt-5 flex flex-wrap gap-1.5" role="group" aria-label="Filter by type">
+      <div className="mt-5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter documents">
         {['', ...docTypes].map((t) => (
           <button
             key={t || 'all'}
@@ -139,6 +149,22 @@ export default function DocumentsPage() {
             {t ? typeLabel(t) + 's' : 'All'}
           </button>
         ))}
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          aria-label="Filter by business area"
+          className={cn(
+            'h-[1.875rem] rounded-full border bg-card px-3 text-sm',
+            category ? 'border-ink text-foreground' : 'text-muted-foreground',
+          )}
+        >
+          <option value="">Any area</option>
+          {Object.entries(categories).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {hits.length > 0 && (
@@ -167,17 +193,31 @@ export default function DocumentsPage() {
           {filtering ? (
             <>
               <p className="font-medium">Nothing matches that search.</p>
-              <p className="mt-1 text-sm text-muted-foreground">Try a shorter word, or clear the type filter.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Try a shorter word, or clear the filters.</p>
             </>
           ) : (
             <>
               <p className="text-lg font-medium">Your archive is empty</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Drop scans or phone photos anywhere on this page. PDF, JPG, PNG, HEIC and TIFF up to 50 MB each.
+                <span className="md:hidden">Photograph your first document, or upload files you already have.</span>
+                <span className="hidden md:inline">
+                  Drop scans or phone photos anywhere on this page. PDF, JPG, PNG, HEIC and TIFF up to 50 MB each.
+                </span>
               </p>
-              <Button className="mt-5" onClick={() => fileInput.current?.click()}>
-                <Upload aria-hidden /> Upload scans
-              </Button>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                <Link
+                  to="/scan"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-sm font-medium text-primary-foreground md:hidden"
+                >
+                  Scan a document
+                </Link>
+                <Button variant="outline" className="md:hidden" onClick={() => fileInput.current?.click()}>
+                  <Upload aria-hidden /> Upload files
+                </Button>
+                <Button className="hidden md:inline-flex" onClick={() => fileInput.current?.click()}>
+                  <Upload aria-hidden /> Upload scans
+                </Button>
+              </div>
             </>
           )}
         </div>
@@ -186,12 +226,41 @@ export default function DocumentsPage() {
         docs.length > 0 && (
           <section className="mt-8" aria-label="Document list">
             {hits.length > 0 && <h2 className="mb-2 text-sm font-semibold">Matching documents</h2>}
-            <div className="overflow-x-auto border-y bg-card">
-              <table className="w-full min-w-[640px] text-sm">
+            {/* Phone: stacked rows */}
+            <ul className="divide-y border-y bg-card md:hidden">
+              {docs.map((d) => (
+                <li key={d.id}>
+                  <Link to={`/documents/${d.id}`} className="flex items-start gap-3 px-4 py-3 active:bg-accent/50">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{d.title || d.filename}</div>
+                      <div className="truncate text-sm text-muted-foreground">
+                        {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : '')}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                        <span>{typeLabel(d.doc_type)}</span>
+                        {categoryLabel(d.category) && <span>{categoryLabel(d.category)}</span>}
+                        {d.doc_date && <span className="tabular-nums">{formatDate(d.doc_date)}</span>}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-sm">
+                      {d.total_amount != null && (
+                        <div className="font-medium tabular-nums">{formatAmount(d.total_amount, d.currency)}</div>
+                      )}
+                      <StatusMark doc={d} />
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+
+            {/* Desktop: ledger table */}
+            <div className="hidden overflow-x-auto border-y bg-card md:block">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead>
                   <tr className="border-b border-ink text-left text-xs font-medium text-muted-foreground">
                     <th className="px-4 py-2 font-medium">Document</th>
                     <th className="px-3 py-2 font-medium">Type</th>
+                    <th className="px-3 py-2 font-medium">Relates to</th>
                     <th className="px-3 py-2 font-medium">Dated</th>
                     <th className="px-3 py-2 text-right font-medium">Amount</th>
                     <th className="px-4 py-2 font-medium">Status</th>
@@ -205,10 +274,11 @@ export default function DocumentsPage() {
                           {d.title || d.filename}
                         </Link>
                         <div className="truncate text-muted-foreground">
-                          {d.counterparty || (d.title !== d.filename ? d.filename : d.page_count === 1 ? '1 page' : d.page_count ? `${d.page_count} pages` : '')}
+                          {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : d.page_count === 1 ? '1 page' : d.page_count ? `${d.page_count} pages` : '')}
                         </div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{typeLabel(d.doc_type)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{categoryLabel(d.category)}</td>
                       <td className="px-3 py-3 whitespace-nowrap text-muted-foreground tabular-nums">
                         {formatDate(d.doc_date)}
                       </td>
@@ -226,6 +296,40 @@ export default function DocumentsPage() {
           </section>
         )
       )}
+
+      <Sheet open={phoneOpen} onOpenChange={setPhoneOpen}>
+        <SheetContent className="w-full gap-0 sm:max-w-md data-[side=right]:sm:max-w-md">
+          <SheetHeader className="border-b">
+            <SheetTitle>Scan with your phone</SheetTitle>
+            <SheetDescription>Photograph documents and they appear here.</SheetDescription>
+          </SheetHeader>
+          <div className="p-5 text-sm leading-relaxed">
+            {phoneUrl ? (
+              <>
+                <div className="mx-auto w-fit border bg-white p-4">
+                  <QRCodeSVG value={phoneUrl} size={208} fgColor="#16233b" />
+                </div>
+                <ol className="mt-6 list-decimal space-y-2 pl-5">
+                  <li>Connect the phone to the same Wi-Fi as this computer.</li>
+                  <li>
+                    Point its camera at the code, or open <span className="font-medium break-all">{phoneUrl}</span>
+                  </li>
+                  <li>Sign in with your account, then tap Take photo.</li>
+                </ol>
+                <p className="mt-6 text-muted-foreground">
+                  This address works only on your local network and is not encrypted. To scan from anywhere, the app
+                  needs to be hosted with HTTPS.
+                </p>
+              </>
+            ) : (
+              <p>
+                This computer has no local network address right now. Connect it to Wi-Fi, reload this page, and try
+                again.
+              </p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-primary/10 backdrop-blur-[2px]">
