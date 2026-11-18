@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
 import { Building2, Camera, FileStack, LogOut, MessagesSquare } from 'lucide-react'
+import { CLAUDE_SETUP, READER_SETUP, SetupNote } from '@/components/SetupNote'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider, useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
@@ -52,10 +53,16 @@ function Shell() {
         </nav>
         <div className="mt-auto">
           {capabilities && (!capabilities.claude || !capabilities.local_ocr) && (
-            <div className="mb-3 rounded-md border border-dashed px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-              {!capabilities.local_ocr && <p>Local OCR worker is not running, so new uploads will wait or fail.</p>}
+            <div className="mb-3 space-y-2 rounded-md border border-dashed px-3 py-2">
+              {!capabilities.local_ocr && (
+                <SetupNote details={READER_SETUP} className="text-xs">
+                  Reading new documents is paused.
+                </SetupNote>
+              )}
               {!capabilities.claude && (
-                <p>No Claude API key is set. Search works; questions, summaries and Claude vision are off.</p>
+                <SetupNote details={CLAUDE_SETUP} className="text-xs">
+                  Questions and summaries are not switched on yet. Search works.
+                </SetupNote>
               )}
             </div>
           )}

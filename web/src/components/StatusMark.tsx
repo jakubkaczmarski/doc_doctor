@@ -16,7 +16,7 @@ export function StatusMark({ doc }: { doc: Doc }) {
     case 'failed':
       return (
         <span className="font-medium text-stamp" title={doc.error}>
-          Failed
+          Could not read
         </span>
       )
     default:

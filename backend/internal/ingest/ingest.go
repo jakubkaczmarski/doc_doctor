@@ -87,10 +87,10 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 		fmt.Fprintf(&full, "--- page %d ---\n%s\n\n", pg.PageNo, pg.Text)
 	}
 	if strings.TrimSpace(joinText(pages)) == "" {
-		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "No readable text was found in this file."))
+		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "We could not find any text in this file. If it is a photo, try again in better light."))
 	}
 	if p.Claude == nil {
-		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "Text is searchable. Summary and fields were not extracted because no Claude API key is configured."))
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "This document can be searched. Summaries and key details are not switched on yet."))
 	}
 
 	p.Store.SetStage(ctx, doc.ID, "analyzing")
@@ -100,8 +100,10 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 	}
 	analysis, err := p.Claude.Analyze(ctx, company, doc.Filename, full.String())
 	if err != nil {
-		// The text is already searchable; keep the document usable and surface the reason.
-		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "Metadata extraction failed: "+err.Error()))
+		// The text is already searchable; keep the document usable. The technical reason
+		// goes to the server log, the user sees a plain-language note.
+		log.Printf("ingest: document %d: metadata extraction failed: %v", doc.ID, err)
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "This document can be searched, but its summary and key details could not be created. Use Read again to retry."))
 	}
 	return p.Store.FinishDocument(ctx, doc.ID, analysis, notice)
 }
@@ -112,7 +114,7 @@ func (p *Pipeline) finishWithGuess(ctx context.Context, doc store.Document, text
 	if g == nil {
 		return p.Store.FinishDocument(ctx, doc.ID, nil, notice)
 	}
-	return p.Store.FinishDocument(ctx, doc.ID, g, appendNote(notice, "Type and business area were guessed from keywords."))
+	return p.Store.FinishDocument(ctx, doc.ID, g, appendNote(notice, "Its type was worked out from keywords, so check that it looks right."))
 }
 
 // ocr picks the engine: local first, Claude vision when requested or (in auto mode) when
@@ -137,7 +139,7 @@ func (p *Pipeline) ocr(ctx context.Context, doc store.Document, data []byte, mod
 	}
 	if lerr == nil && (!weak || !canEscalate) {
 		if weak && mode == "auto" {
-			notice = fmt.Sprintf("Local OCR was unsure about parts of this scan (confidence %.0f%%, %.0f%% of the text in doubt). Configure a Claude API key to re-read weak scans with Claude vision.", res.Confidence*100, res.WeakRatio*100)
+			notice = "Parts of this scan were hard to read. Check the text against the picture, or scan it again in better light."
 		}
 		c := res.Confidence
 		return res.Pages, res.Engine, &c, notice, nil
@@ -149,13 +151,14 @@ func (p *Pipeline) ocr(ctx context.Context, doc store.Document, data []byte, mod
 		if lerr != nil {
 			return nil, "", nil, "", fmt.Errorf("local OCR failed (%v) and Claude vision failed (%v)", lerr, cerr)
 		}
+		log.Printf("ingest: document %d: Claude vision retry failed: %v", doc.ID, cerr)
 		c := res.Confidence
-		return res.Pages, res.Engine, &c, "Local OCR was unsure about parts of this scan and the Claude vision retry failed: " + cerr.Error(), nil
+		return res.Pages, res.Engine, &c, "Parts of this scan were hard to read. Check the text against the picture, or scan it again in better light.", nil
 	}
 	if lerr != nil {
-		notice = "Local OCR was unavailable, so Claude vision read this document."
+		notice = ""
 	} else {
-		notice = fmt.Sprintf("Local OCR was unsure about this scan (confidence %.0f%%), so Claude vision re-read it.", res.Confidence*100)
+		notice = "The first read was unclear, so this scan was read a second time more carefully."
 	}
 	return cpages, "claude-vision", nil, notice, nil
 }

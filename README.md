@@ -48,8 +48,9 @@ it serves the built web app on `:8080`. The OCR worker downloads its models
 The web app has a phone layout with a **Scan** tab: take a photo of each page, and the
 pages are joined into one PDF document, then read and filed like any upload.
 
-On the desktop, **Documents → Scan with phone** shows a QR code for the server's
-local-network address. The phone must be on the same Wi-Fi and you sign in on it once.
+On the desktop, **Documents → Scan with phone** shows a QR code holding a one-time
+sign-in link (valid 10 minutes) to the server's local-network address. The phone must be
+on the same Wi-Fi; pointing its camera at the code opens the Scan screen already signed in.
 That address is plain HTTP, so it is for testing on a trusted network; scanning from
 anywhere needs the app hosted behind HTTPS. On macOS the firewall may ask to allow
 incoming connections for the server the first time.

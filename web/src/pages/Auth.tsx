@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +15,7 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const signUp = mode === 'sign-up'
+  const linkExpired = useSearchParams()[0].get('link') === 'expired'
 
   if (!loading && user) return <Navigate to="/documents" replace />
 
@@ -71,6 +72,13 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           <p className="mt-1 mb-8 text-sm text-muted-foreground">
             {signUp ? 'One workspace for your business documents.' : 'Open your document archive.'}
           </p>
+
+          {linkExpired && (
+            <p role="status" className="mb-6 border-l-2 border-stamp bg-card px-4 py-3 text-sm">
+              That phone code has expired or was already used. On your computer, open Scan with phone again for a new
+              code, or sign in here.
+            </p>
+          )}
 
           <div className="space-y-4">
             {signUp && (

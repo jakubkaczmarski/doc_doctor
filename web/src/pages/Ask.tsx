@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { ArrowUp, ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
+import { CLAUDE_SETUP, SetupNote } from '@/components/SetupNote'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
@@ -162,10 +163,10 @@ export default function AskPage() {
                   Answers come from your scanned documents, and each one points to the page it was found on.
                 </p>
                 {capabilities && !capabilities.claude ? (
-                  <p className="mt-8 border-l-2 border-stamp bg-card px-4 py-3 text-sm">
-                    Asking questions needs a Claude API key. Add <code>ANTHROPIC_API_KEY</code> to the server&apos;s{' '}
-                    <code>.env</code> file and restart it. Search on the Documents page works without one.
-                  </p>
+                  <SetupNote details={CLAUDE_SETUP} className="mt-8 border-l-2 border-stamp bg-card px-4 py-3">
+                    Questions are not switched on yet. You can still find documents with the search box on the
+                    Documents page.
+                  </SetupNote>
                 ) : (
                   <ul className="mt-8 divide-y border-y">
                     {STARTERS.map((s) => (
@@ -213,7 +214,7 @@ export default function AskPage() {
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKey}
               rows={1}
-              placeholder="Ask about your documents"
+              placeholder="Type a question about your documents"
               aria-label="Your question"
               className="max-h-40 min-h-10 resize-none bg-background"
             />
@@ -268,7 +269,7 @@ function Answer({
               // Once the answer is complete, only citations the server confirmed against
               // the documents it actually read get a link.
               if (!streaming && message.checked && !confirmed.has(`${cite.docId}:${cite.page}`)) {
-                return <span className="text-sm text-muted-foreground">(source not verified)</span>
+                return <span className="text-sm text-muted-foreground">(page could not be confirmed)</span>
               }
               return (
                 <button
@@ -298,18 +299,19 @@ function Answer({
         <div role="note" className="mt-5 max-w-[68ch] border-l-2 border-stamp bg-card px-4 py-3 text-sm">
           {docs.length === 0 && (
             <p>
-              <span className="font-medium">No document backs this answer.</span> It cites no page from your archive,
-              so do not rely on it for facts.
+              <span className="font-medium">No document backs this answer.</span> It does not point to any page in
+              your archive, so do not rely on it for facts.
             </p>
           )}
           {unverified.length > 0 && (
             <p className={docs.length === 0 ? 'mt-2' : undefined}>
               <span className="font-medium">
-                {unverified.length === 1 ? 'One figure was' : `${unverified.length} figures were`} not found in the
-                pages the assistant read:
+                {unverified.length === 1 ? 'One number is' : `${unverified.length} numbers are`} not written in the
+                pages it read:
               </span>{' '}
-              <span className="tabular-nums">{unverified.join(', ')}</span>. Calculated or mistaken, check{' '}
-              {unverified.length === 1 ? 'it' : 'them'} against the source.
+              <span className="tabular-nums">{unverified.join(', ')}</span>.{' '}
+              {unverified.length === 1 ? 'It' : 'They'} may be worked out from other numbers, or may be wrong. Check{' '}
+              {unverified.length === 1 ? 'it' : 'them'} in the document.
             </p>
           )}
         </div>
@@ -361,7 +363,7 @@ function PagePeek({ cite, onClose }: { cite: Cite | null; onClose: () => void })
       <SheetContent className="w-full gap-0 sm:max-w-xl data-[side=right]:sm:max-w-xl">
         <SheetHeader className="border-b">
           <SheetTitle className="pr-8">{title || 'Source'}</SheetTitle>
-          <SheetDescription>{cite ? `Page ${cite.page}, as read from the scan` : ''}</SheetDescription>
+          <SheetDescription>{cite ? `Page ${cite.page}: the picture, then the text read from it` : ''}</SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {error ? (
@@ -385,7 +387,7 @@ function PagePeek({ cite, onClose }: { cite: Cite | null; onClose: () => void })
               to={`/documents/${cite.docId}#p${cite.page}`}
               className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
-              <ExternalLink className="size-3.5" aria-hidden /> Open the document next to its scan
+              <ExternalLink className="size-3.5" aria-hidden /> Open the whole document
             </Link>
           </div>
         )}

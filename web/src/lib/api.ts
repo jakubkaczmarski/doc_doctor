@@ -108,6 +108,7 @@ export const api = {
   login: (email: string, password: string) => request<User>('/auth/login', json({ email, password })),
   register: (org_name: string, email: string, password: string) =>
     request<User>('/auth/register', json({ org_name, email, password })),
+  phoneLink: () => request<{ urls: string[]; minutes: number }>('/auth/phone-link', { method: 'POST' }),
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   documents: (q = '', type = '', category = '') =>
@@ -224,6 +225,14 @@ export function formatDate(iso: string | null) {
   if (!iso) return ''
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+/** How clearly a scan could be read, in words rather than a percentage. */
+export function readability(confidence: number | null): { label: string; poor: boolean } | null {
+  if (confidence == null) return null
+  if (confidence >= 0.95) return { label: 'Read clearly', poor: false }
+  if (confidence >= 0.85) return { label: 'Mostly clear', poor: false }
+  return { label: 'Hard to read', poor: true }
 }
 
 export function engineLabel(engine: string) {

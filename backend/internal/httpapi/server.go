@@ -59,10 +59,12 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/auth/register", s.register)
 		r.Post("/auth/login", s.login)
 		r.Post("/auth/logout", s.logout)
+		r.Get("/auth/link/{token}", s.redeemPhoneLink)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireUser)
 			r.Get("/me", s.me)
+			r.Post("/auth/phone-link", s.createPhoneLink)
 			r.Get("/stats", s.stats)
 			r.Get("/org", s.getOrg)
 			r.Put("/org", s.putOrg)
@@ -251,6 +253,43 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+const phoneLinkTTL = 10 * time.Minute
+
+// createPhoneLink issues a one-time link that signs another device in as this user.
+// The desktop shows it as a QR code so a phone can start scanning without a password.
+func (s *Server) createPhoneLink(w http.ResponseWriter, r *http.Request) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		s.fail(w, err)
+		return
+	}
+	token := hex.EncodeToString(raw)
+	if err := s.Store.CreateLoginLink(r.Context(), hashToken(token), userFrom(r).ID, phoneLinkTTL); err != nil {
+		s.fail(w, err)
+		return
+	}
+	urls := []string{}
+	for _, base := range s.lanURLs() {
+		urls = append(urls, base+"/api/auth/link/"+token)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"urls": urls, "minutes": int(phoneLinkTTL.Minutes())})
+}
+
+// redeemPhoneLink signs the visiting device in and sends it to the Scan screen.
+func (s *Server) redeemPhoneLink(w http.ResponseWriter, r *http.Request) {
+	userID, err := s.Store.RedeemLoginLink(r.Context(), hashToken(chi.URLParam(r, "token")))
+	if err != nil {
+		http.Redirect(w, r, "/sign-in?link=expired", http.StatusSeeOther)
+		return
+	}
+	if err := s.startSession(w, r, store.User{ID: userID}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	http.Redirect(w, r, "/scan", http.StatusSeeOther)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {

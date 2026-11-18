@@ -108,6 +108,9 @@
   }
   html {
     @apply font-sans;
+    /* Slightly larger than the browser default: every rem-based size (text, buttons,
+       tap targets) scales with it, which helps people who are not at a desk monitor. */
+    font-size: 106.25%;
   }
   body {
     @apply bg-background text-foreground antialiased;

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Download, ScanText, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusMark } from '@/components/StatusMark'
-import { api, categoryLabel, engineLabel, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
+import { api, categoryLabel, readability, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
 import { useSession } from '@/lib/session'
 
 export default function DocumentPage() {
@@ -43,10 +43,12 @@ export default function DocumentPage() {
     if (hash && pages.length) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' })
   }, [hash, pages.length])
 
-  async function reread(ocr: 'local' | 'claude') {
+  // "Read again" uses the more careful reader when it is available, otherwise repeats the normal read.
+  async function reread() {
+    const careful = capabilities?.claude && doc?.ocr_engine !== 'claude-vision' && doc?.status !== 'failed'
     try {
-      await api.reprocess(id, ocr)
-      toast.success(ocr === 'claude' ? 'Reading again with Claude vision.' : 'Reading again with local OCR.')
+      await api.reprocess(id, careful ? 'claude' : 'auto')
+      toast.success(careful ? 'Reading it again, more carefully.' : 'Reading it again.')
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not start a new read.')
@@ -76,6 +78,7 @@ export default function DocumentPage() {
   if (!doc) return null
 
   const fileUrl = `/api/documents/${doc.id}/file`
+  const quality = doc.ocr_engine === 'pdf-text' ? null : readability(doc.ocr_confidence)
   const facts: [string, string][] = [
     ['Type', typeLabel(doc.doc_type)],
     ['Relates to', categoryLabel(doc.category)],
@@ -102,41 +105,29 @@ export default function DocumentPage() {
         </div>
         {!pending && (
           <>
-            {doc.ocr_engine !== 'claude-vision' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void reread('claude')}
-                disabled={!capabilities?.claude}
-                title={capabilities?.claude ? undefined : 'Needs a Claude API key on the server'}
-              >
-                <Sparkles aria-hidden /> Re-read with Claude vision
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" onClick={() => void reread('local')}>
-                <ScanText aria-hidden /> Re-read with local OCR
-              </Button>
-            )}
+            <Button variant="outline" onClick={() => void reread()}>
+              <RotateCw aria-hidden /> Read again
+            </Button>
             <a
               href={fileUrl}
               download={doc.filename}
-              className="inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium hover:bg-muted"
             >
-              <Download className="size-3.5" aria-hidden /> Original
+              <Download className="size-4" aria-hidden /> Download
             </a>
             {confirmDelete ? (
               <span className="flex items-center gap-1.5 text-sm">
                 Delete for good?
-                <Button variant="destructive" size="sm" onClick={() => void remove()}>
+                <Button variant="destructive" onClick={() => void remove()}>
                   Delete
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
+                <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
                   Keep
                 </Button>
               </span>
             ) : (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} aria-label="Delete document">
-                <Trash2 aria-hidden />
+              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                <Trash2 aria-hidden /> Delete
               </Button>
             )}
           </>
@@ -146,8 +137,18 @@ export default function DocumentPage() {
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
         {doc.status === 'failed' && (
           <div role="alert" className="mb-6 max-w-3xl border-l-2 border-stamp bg-card px-4 py-3 text-sm">
-            <p className="font-medium text-stamp">This file could not be read</p>
-            <p className="mt-1 text-muted-foreground">{doc.error}</p>
+            <p className="font-medium text-stamp">We could not read this file</p>
+            <p className="mt-1">
+              This sometimes happens with damaged files or very dark photos. Try again, and if it still fails, scan the
+              document once more.
+            </p>
+            <Button className="mt-3" onClick={() => void reread()}>
+              <RotateCw aria-hidden /> Try again
+            </Button>
+            <details className="mt-3 text-muted-foreground">
+              <summary className="cursor-pointer underline-offset-4 hover:underline">Technical details</summary>
+              <p className="mt-1 [overflow-wrap:anywhere]">{doc.error}</p>
+            </details>
           </div>
         )}
         {doc.notice && (
@@ -182,11 +183,12 @@ export default function DocumentPage() {
         {pages.length > 0 && (
           <section>
             <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-              <h2 className="font-semibold">Scan and text, page by page</h2>
-              <p className="text-sm text-muted-foreground">
-                Read by {engineLabel(doc.ocr_engine)}
-                {doc.ocr_confidence != null && `, ${Math.round(doc.ocr_confidence * 100)}% confident`}
-              </p>
+              <h2 className="font-semibold">Each page: the picture and what we read from it</h2>
+              {quality && (
+                <p className={quality.poor ? 'text-sm font-medium text-stamp' : 'text-sm text-muted-foreground'}>
+                  {quality.label}
+                </p>
+              )}
             </div>
             {pages.map((p) => (
               <article
@@ -197,7 +199,7 @@ export default function DocumentPage() {
                 <div className="flex justify-between border-b px-5 py-1.5 text-xs text-muted-foreground">
                   <span>Page {p.page_no}</span>
                   {p.confidence != null && p.confidence < 0.85 && (
-                    <span className="text-stamp">Low confidence, check against the scan</span>
+                    <span className="text-stamp">Hard to read, check it against the picture</span>
                   )}
                 </div>
                 <div className="grid lg:grid-cols-2">
@@ -206,7 +208,7 @@ export default function DocumentPage() {
                     target="_blank"
                     rel="noreferrer"
                     className="block border-b bg-muted p-4 lg:border-r lg:border-b-0"
-                    title="Open the scan at full size"
+                    title="Open the picture at full size"
                   >
                     <img
                       src={`/api/documents/${doc.id}/pages/${p.page_no}/image`}

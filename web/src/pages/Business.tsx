@@ -86,10 +86,10 @@ export default function BusinessPage() {
       <section className="mt-12 border-t pt-6">
         <h2 className="font-semibold">How answers are kept to your documents</h2>
         <ul className="mt-3 max-w-[68ch] list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
-          <li>The assistant can only look up documents in this archive. It has no web access and cannot see other businesses.</li>
+          <li>The assistant can only look in this archive. It cannot browse the internet or see another business.</li>
           <li>It is instructed to answer from your documents and this page only, and to say so when they do not hold the answer.</li>
-          <li>Each fact links to the page it came from. A link that does not match a page it actually read is marked as not verified.</li>
-          <li>Figures that do not appear in the pages it read are listed under the answer, so calculated or mistaken numbers stand out.</li>
+          <li>Each fact has a yellow page marker. Tap it to see the page it came from. A marker that does not match a page it really read is flagged.</li>
+          <li>Numbers that are not written in the pages it read are listed under the answer, so worked-out or wrong numbers stand out.</li>
         </ul>
       </section>
     </div>

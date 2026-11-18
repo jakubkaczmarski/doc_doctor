@@ -128,6 +128,26 @@ func (s *Store) UserBySession(ctx context.Context, tokenHash []byte) (User, erro
 	return u, err
 }
 
+// CreateLoginLink stores a one-time sign-in token for a user.
+func (s *Store) CreateLoginLink(ctx context.Context, tokenHash []byte, userID int64, ttl time.Duration) error {
+	// Old links are swept here so the table never grows.
+	if _, err := s.DB.Exec(ctx, `DELETE FROM login_links WHERE expires_at < now()`); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(ctx, `INSERT INTO login_links (token_hash, user_id, expires_at) VALUES ($1,$2,$3)`, tokenHash, userID, time.Now().Add(ttl))
+	return err
+}
+
+// RedeemLoginLink consumes a one-time token and returns the user it signs in.
+func (s *Store) RedeemLoginLink(ctx context.Context, tokenHash []byte) (int64, error) {
+	var userID int64
+	err := s.DB.QueryRow(ctx, `DELETE FROM login_links WHERE token_hash=$1 AND expires_at > now() RETURNING user_id`, tokenHash).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return userID, err
+}
+
 func (s *Store) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	_, err := s.DB.Exec(ctx, `DELETE FROM sessions WHERE token_hash=$1`, tokenHash)
 	return err
