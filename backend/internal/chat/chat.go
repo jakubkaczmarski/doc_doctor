@@ -25,7 +25,7 @@ type Agent struct {
 
 // Event is one server-sent event for the chat UI.
 type Event struct {
-	Type    string         `json:"type"` // text | tool | sources | error | done
+	Type    string         `json:"type"` // text | reset | tool | sources | error | done
 	Text    string         `json:"text,omitempty"`
 	Sources []store.Source `json:"sources,omitempty"`
 	// Figures in the answer that were not found in the material the model read.
@@ -276,6 +276,7 @@ func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string
 	var answer strings.Builder
 	for iter := 0; iter < 16; iter++ {
 		params.Messages = msgs
+		turnStart := answer.Len() // text written before a tool call is a working note, not the answer
 		stream := a.LLM.API.Beta.Messages.NewStreaming(ctx, params)
 		msg := anthropic.BetaMessage{}
 		for stream.Next() {
@@ -325,9 +326,13 @@ func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string
 			emit(Event{Type: "tool", Text: label})
 			results = append(results, anthropic.NewBetaToolResultBlock(tu.ID, out, false))
 		}
-		if answer.Len() > 0 && !strings.HasSuffix(answer.String(), "\n\n") {
-			answer.WriteString("\n\n")
-			emit(Event{Type: "text", Text: "\n\n"})
+		// The model sometimes narrates before looking something up ("Let me read both
+		// invoices"). That is not part of the answer, so drop it and tell the UI to as well.
+		if answer.Len() > turnStart {
+			kept := answer.String()[:turnStart]
+			answer.Reset()
+			answer.WriteString(kept)
+			emit(Event{Type: "reset", Text: kept})
 		}
 		msgs = append(msgs, anthropic.NewBetaUserMessage(results...))
 	}

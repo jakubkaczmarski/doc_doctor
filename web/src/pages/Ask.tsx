@@ -83,6 +83,9 @@ export default function AskPage() {
             setActivity('')
             patchLast((m) => ({ ...m, content: m.content + e.text }))
             break
+          case 'reset':
+            patchLast((m) => ({ ...m, content: e.text ?? '' }))
+            break
           case 'tool':
             setActivity(e.text)
             break

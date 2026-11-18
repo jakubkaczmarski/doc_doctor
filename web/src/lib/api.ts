@@ -146,6 +146,8 @@ export const api = {
 export type ChatEvent =
   | { type: 'conversation'; conversation_id: number }
   | { type: 'text'; text: string }
+  /** Replace the answer so far (working notes written before a lookup are dropped). */
+  | { type: 'reset'; text?: string }
   | { type: 'tool'; text: string }
   | { type: 'sources'; sources?: Source[]; unverified?: string[] }
   | { type: 'error'; text: string }
