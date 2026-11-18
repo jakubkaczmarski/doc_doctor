@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
-import { FileStack, LogOut, MessagesSquare } from 'lucide-react'
+import { Building2, FileStack, LogOut, MessagesSquare } from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider, useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
@@ -7,6 +7,7 @@ import AuthPage from '@/pages/Auth'
 import DocumentsPage from '@/pages/Documents'
 import DocumentPage from '@/pages/Document'
 import AskPage from '@/pages/Ask'
+import BusinessPage from '@/pages/Business'
 
 function Shell() {
   const { user, capabilities, loading, signOut } = useSession()
@@ -34,6 +35,10 @@ function Shell() {
           </NavLink>
           <NavLink to="/ask" className={link}>
             <MessagesSquare className="size-4" aria-hidden /> Ask
+          </NavLink>
+          <NavLink to="/business" className={link}>
+            <Building2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Business info</span>
+            <span className="sm:hidden">Info</span>
           </NavLink>
         </nav>
         <div className="ml-auto md:mt-auto md:ml-0">
@@ -73,6 +78,7 @@ export default function App() {
             <Route path="/documents/:id" element={<DocumentPage />} />
             <Route path="/ask" element={<AskPage />} />
             <Route path="/ask/:id" element={<AskPage />} />
+            <Route path="/business" element={<BusinessPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/documents" replace />} />
         </Routes>

@@ -50,7 +50,7 @@ export default function AskPage() {
     }
     api
       .conversation(convId)
-      .then((r) => setMessages(r.messages))
+      .then((r) => setMessages(r.messages.map((m) => ({ ...m, checked: true }))))
       .catch(() => navigate('/ask', { replace: true }))
   }, [convId, navigate])
 
@@ -86,7 +86,7 @@ export default function AskPage() {
             setActivity(e.text)
             break
           case 'sources':
-            patchLast((m) => ({ ...m, sources: e.sources }))
+            patchLast((m) => ({ ...m, sources: e.sources ?? [], unverified: e.unverified ?? [], checked: true }))
             break
           case 'error':
             toast.error(e.text)
@@ -244,6 +244,9 @@ function Answer({
   onCite: (c: Cite) => void
 }) {
   const titles = new Map(message.sources.map((s) => [s.doc_id, s.title]))
+  const confirmed = new Set(message.sources.map((s) => `${s.doc_id}:${s.page}`))
+  const unverified = message.unverified ?? []
+  const isAnswer = !message.content.startsWith('(No answer')
   const docs = [...new Map(message.sources.map((s) => [s.doc_id, s])).values()]
 
   return (
@@ -264,7 +267,7 @@ function Answer({
               const cite = { docId: Number(m[1]), page: Number(m[2]) }
               // Once the answer is complete, only citations the server confirmed against
               // the documents it actually read get a link.
-              if (!streaming && !titles.has(cite.docId)) {
+              if (!streaming && message.checked && !confirmed.has(`${cite.docId}:${cite.page}`)) {
                 return <span className="text-sm text-muted-foreground">(source not verified)</span>
               }
               return (
@@ -289,6 +292,27 @@ function Answer({
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
           {activity || 'Writing'}
         </p>
+      )}
+
+      {!streaming && message.checked && isAnswer && (docs.length === 0 || unverified.length > 0) && (
+        <div role="note" className="mt-5 max-w-[68ch] border-l-2 border-stamp bg-card px-4 py-3 text-sm">
+          {docs.length === 0 && (
+            <p>
+              <span className="font-medium">No document backs this answer.</span> It cites no page from your archive,
+              so do not rely on it for facts.
+            </p>
+          )}
+          {unverified.length > 0 && (
+            <p className={docs.length === 0 ? 'mt-2' : undefined}>
+              <span className="font-medium">
+                {unverified.length === 1 ? 'One figure was' : `${unverified.length} figures were`} not found in the
+                pages the assistant read:
+              </span>{' '}
+              <span className="tabular-nums">{unverified.join(', ')}</span>. Calculated or mistaken, check{' '}
+              {unverified.length === 1 ? 'it' : 'them'} against the source.
+            </p>
+          )}
+        </div>
       )}
 
       {docs.length > 0 && (

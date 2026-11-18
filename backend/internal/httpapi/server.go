@@ -60,6 +60,8 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.requireUser)
 			r.Get("/me", s.me)
 			r.Get("/stats", s.stats)
+			r.Get("/org", s.getOrg)
+			r.Put("/org", s.putOrg)
 			r.Get("/documents", s.listDocuments)
 			r.Post("/documents", s.upload)
 			r.Get("/documents/{id}", s.getDocument)
@@ -257,6 +259,39 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			"model":     s.Cfg.Model,
 		},
 	})
+}
+
+// ---------- business info ----------
+
+const maxProfileChars = 8000
+
+func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r)
+	profile, err := s.Store.OrgProfile(r.Context(), u.OrgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": u.OrgName, "profile": profile, "max_chars": maxProfileChars})
+}
+
+func (s *Server) putOrg(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Profile string `json:"profile"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	in.Profile = strings.TrimSpace(in.Profile)
+	if len([]rune(in.Profile)) > maxProfileChars {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Business info is limited to %d characters.", maxProfileChars))
+		return
+	}
+	if err := s.Store.SetOrgProfile(r.Context(), userFrom(r).OrgID, in.Profile); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": in.Profile})
 }
 
 // ---------- documents ----------
@@ -577,7 +612,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.Store.AddMessage(ctx, in.ConversationID, "user", in.Message, nil); err != nil {
+	if err := s.Store.AddMessage(ctx, in.ConversationID, "user", in.Message, nil, nil); err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	// Read before the stream starts so a database error can still be a normal HTTP error.
+	profile, err := s.Store.OrgProfile(ctx, u.OrgID)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -595,26 +637,26 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	send(map[string]any{"type": "conversation", "conversation_id": in.ConversationID})
 
-	answer, sources, err := s.Agent.Answer(ctx, u.OrgID, u.OrgName, history, in.Message, func(e chat.Event) { send(e) })
+	res, err := s.Agent.Answer(ctx, u.OrgID, u.OrgName, profile, history, in.Message, func(e chat.Event) { send(e) })
 	// Persist with a context that survives the client disconnecting mid-stream.
 	save := context.WithoutCancel(ctx)
 	if err != nil {
 		log.Printf("chat: %v", err)
-		if answer != "" {
-			s.Store.AddMessage(save, in.ConversationID, "assistant", answer, sources)
+		if res.Answer != "" {
+			s.Store.AddMessage(save, in.ConversationID, "assistant", res.Answer, nil, nil)
 		} else {
 			// Keep roles alternating so the next turn's history is valid.
-			s.Store.AddMessage(save, in.ConversationID, "assistant", "(No answer: "+err.Error()+")", nil)
+			s.Store.AddMessage(save, in.ConversationID, "assistant", "(No answer: "+err.Error()+")", nil, nil)
 		}
 		send(chat.Event{Type: "error", Text: err.Error()})
 		return
 	}
-	if answer == "" {
-		answer = "(No answer was produced.)"
+	if res.Answer == "" {
+		res.Answer = "(No answer was produced.)"
 	}
-	if err := s.Store.AddMessage(save, in.ConversationID, "assistant", answer, sources); err != nil {
+	if err := s.Store.AddMessage(save, in.ConversationID, "assistant", res.Answer, res.Sources, res.Unverified); err != nil {
 		log.Printf("chat: save answer: %v", err)
 	}
-	send(chat.Event{Type: "sources", Sources: sources})
+	send(chat.Event{Type: "sources", Sources: res.Sources, Unverified: res.Unverified})
 	send(chat.Event{Type: "done"})
 }

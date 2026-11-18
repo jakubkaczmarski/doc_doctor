@@ -133,6 +133,18 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	return err
 }
 
+// OrgProfile returns the business info the owner wrote for the assistant.
+func (s *Store) OrgProfile(ctx context.Context, orgID int64) (string, error) {
+	var profile string
+	err := s.DB.QueryRow(ctx, `SELECT profile FROM orgs WHERE id=$1`, orgID).Scan(&profile)
+	return profile, err
+}
+
+func (s *Store) SetOrgProfile(ctx context.Context, orgID int64, profile string) error {
+	_, err := s.DB.Exec(ctx, `UPDATE orgs SET profile=$2 WHERE id=$1`, orgID, profile)
+	return err
+}
+
 // ---------- documents ----------
 
 type Field struct {
@@ -524,11 +536,13 @@ type Source struct {
 }
 
 type Message struct {
-	ID        int64     `json:"id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	Sources   []Source  `json:"sources"`
-	CreatedAt time.Time `json:"created_at"`
+	ID      int64    `json:"id"`
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Sources []Source `json:"sources"`
+	// Figures in an assistant answer that were not found in what it read.
+	Unverified []string  `json:"unverified"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Conversation struct {
@@ -576,11 +590,14 @@ func (s *Store) DeleteConversation(ctx context.Context, orgID, userID, id int64)
 	return err
 }
 
-func (s *Store) AddMessage(ctx context.Context, convID int64, role, content string, sources []Source) error {
+func (s *Store) AddMessage(ctx context.Context, convID int64, role, content string, sources []Source, unverified []string) error {
 	if sources == nil {
 		sources = []Source{}
 	}
-	if _, err := s.DB.Exec(ctx, `INSERT INTO messages (conversation_id, role, content, sources) VALUES ($1,$2,$3,$4)`, convID, role, content, sources); err != nil {
+	if unverified == nil {
+		unverified = []string{}
+	}
+	if _, err := s.DB.Exec(ctx, `INSERT INTO messages (conversation_id, role, content, sources, unverified) VALUES ($1,$2,$3,$4,$5)`, convID, role, content, sources, unverified); err != nil {
 		return err
 	}
 	_, err := s.DB.Exec(ctx, `UPDATE conversations SET updated_at=now() WHERE id=$1`, convID)
@@ -588,7 +605,7 @@ func (s *Store) AddMessage(ctx context.Context, convID int64, role, content stri
 }
 
 func (s *Store) ListMessages(ctx context.Context, convID int64) ([]Message, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id, role, content, sources, created_at FROM messages WHERE conversation_id=$1 ORDER BY id`, convID)
+	rows, err := s.DB.Query(ctx, `SELECT id, role, content, sources, unverified, created_at FROM messages WHERE conversation_id=$1 ORDER BY id`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +613,7 @@ func (s *Store) ListMessages(ctx context.Context, convID int64) ([]Message, erro
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &m.Sources, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &m.Sources, &m.Unverified, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

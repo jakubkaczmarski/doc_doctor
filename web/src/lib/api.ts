@@ -44,7 +44,16 @@ export type Hit = {
 
 export type Source = { doc_id: number; page: number; title: string }
 
-export type ChatMessage = { id?: number; role: 'user' | 'assistant'; content: string; sources: Source[] }
+export type ChatMessage = {
+  id?: number
+  role: 'user' | 'assistant'
+  content: string
+  sources: Source[]
+  /** Figures in the answer that were not found in what the assistant read. */
+  unverified?: string[]
+  /** True once the server has finished its checks on this answer. */
+  checked?: boolean
+}
 
 export type Conversation = { id: number; title: string; updated_at: string }
 
@@ -103,6 +112,10 @@ export const api = {
   },
   search: (q: string) => request<{ hits: Hit[] }>(`/search?q=${encodeURIComponent(q)}`),
 
+  org: () => request<{ name: string; profile: string; max_chars: number }>('/org'),
+  saveOrg: (profile: string) =>
+    request<{ profile: string }>('/org', { ...json({ profile }), method: 'PUT' }),
+
   conversations: () => request<{ conversations: Conversation[] }>('/conversations'),
   conversation: (id: number) => request<{ messages: ChatMessage[] }>(`/conversations/${id}`),
   deleteConversation: (id: number) => request<{ ok: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
@@ -112,7 +125,7 @@ export type ChatEvent =
   | { type: 'conversation'; conversation_id: number }
   | { type: 'text'; text: string }
   | { type: 'tool'; text: string }
-  | { type: 'sources'; sources: Source[] }
+  | { type: 'sources'; sources?: Source[]; unverified?: string[] }
   | { type: 'error'; text: string }
   | { type: 'done' }
 
