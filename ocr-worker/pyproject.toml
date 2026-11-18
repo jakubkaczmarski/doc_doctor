@@ -1,0 +1,16 @@
+[project]
+name = "ocr-worker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.164.0",
+    "numpy>=2.5.5",
+    "onnxruntime>=1.32.0",
+    "opencv-python-headless>=5.1.0.95",
+    "pillow>=13.0.0",
+    "pillow-heif>=1.8.1",
+    "pypdfium2>=5.15.2",
+    "python-multipart>=0.0.34",
+    "rapidocr>=3.10.0",
+    "uvicorn[standard]>=0.54.0",
+]

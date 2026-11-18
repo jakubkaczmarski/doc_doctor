@@ -1,0 +1,13 @@
+# secrets and local data
+.env
+backend/data/
+backend/server
+
+# dependencies and build output
+node_modules/
+web/dist/
+ocr-worker/.venv/
+__pycache__/
+*.tsbuildinfo
+.DS_Store
+samples/
