@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft, Download, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PageText } from '@/components/PageText'
 import { StatusMark } from '@/components/StatusMark'
 import { api, categoryLabel, readability, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
 import { useSession } from '@/lib/session'
@@ -10,6 +11,8 @@ import { useSession } from '@/lib/session'
 export default function DocumentPage() {
   const id = Number(useParams().id)
   const { hash } = useLocation()
+  // Set when arriving from an answer: the passage it relied on, highlighted on the cited page.
+  const quote = useSearchParams()[0].get('quote') ?? undefined
   const navigate = useNavigate()
   const { capabilities } = useSession()
   const [doc, setDoc] = useState<Doc | null>(null)
@@ -217,9 +220,17 @@ export default function DocumentPage() {
                       className="mx-auto max-h-[80vh] w-auto max-w-full bg-white shadow-sm"
                     />
                   </a>
-                  <div className="ocr-text px-5 py-4">
-                    {p.text || <em className="text-muted-foreground">No text on this page.</em>}
-                  </div>
+                  {p.text ? (
+                    <PageText
+                      text={p.text}
+                      quote={hash === `#p${p.page_no}` ? quote : undefined}
+                      className="ocr-text px-5 py-4"
+                    />
+                  ) : (
+                    <div className="ocr-text px-5 py-4">
+                      <em className="text-muted-foreground">No text on this page.</em>
+                    </div>
+                  )}
                 </div>
               </article>
             ))}

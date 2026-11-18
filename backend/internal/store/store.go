@@ -571,9 +571,14 @@ func (s *Store) SearchPages(ctx context.Context, orgID int64, query, docType str
 // ---------- conversations ----------
 
 type Source struct {
-	DocID int64  `json:"doc_id"`
-	Page  int    `json:"page"`
-	Title string `json:"title"`
+	// Quote is the passage the answer relies on, copied from the page. Empty when the
+	// citation named only a page.
+	Quote string `json:"quote,omitempty"`
+	// Unconfirmed is set when the answer quoted words that are not on the cited page.
+	Unconfirmed bool   `json:"unconfirmed,omitempty"`
+	DocID       int64  `json:"doc_id"`
+	Page        int    `json:"page"`
+	Title       string `json:"title"`
 }
 
 type Message struct {

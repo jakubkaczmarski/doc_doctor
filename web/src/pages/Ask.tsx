@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { ArrowUp, ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
+import { PageText } from '@/components/PageText'
 import { CLAUDE_SETUP, SetupNote } from '@/components/SetupNote'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -18,7 +19,7 @@ const STARTERS = [
   'When does our office lease end, and what is the notice period?',
 ]
 
-type Cite = { docId: number; page: number }
+type Cite = { docId: number; page: number; quote?: string }
 
 export default function AskPage() {
   const params = useParams()
@@ -233,8 +234,17 @@ export default function AskPage() {
   )
 }
 
-/** Turns [12:3] markers into links the Markdown renderer hands back to us as citations. */
-const linkCitations = (text: string) => text.replace(/\[(\d+):(\d+)\](?!\()/g, '[$1:$2](#cite-$1-$2)')
+const CITE = /\[(\d+):(\d+)(?:\s*["“„]([^"”\]]{1,400})["”])?\](?!\()/g
+
+/**
+ * Turns [12:3 "quoted words"] markers into links the Markdown renderer hands back to us
+ * as citations. While an answer is still streaming, a half-written marker at the end is
+ * hidden so raw brackets never flash on screen.
+ */
+function linkCitations(text: string, streaming: boolean) {
+  if (streaming) text = text.replace(/\[\d+(:[^\]]*)?$/, '')
+  return text.replace(CITE, (_, doc, page, quote) => `[cite](#cite-${doc}-${page}-${encodeURIComponent(quote ?? '')})`)
+}
 
 function Answer({
   message,
@@ -248,10 +258,11 @@ function Answer({
   onCite: (c: Cite) => void
 }) {
   const titles = new Map(message.sources.map((s) => [s.doc_id, s.title]))
-  const confirmed = new Set(message.sources.map((s) => `${s.doc_id}:${s.page}`))
+  // Sources are numbered in the order the answer first uses them; the inline markers show that number.
+  const byMarker = new Map(message.sources.map((s, i) => [`${s.doc_id}:${s.page}:${s.quote ?? ''}`, { ...s, n: i + 1 }]))
   const unverified = message.unverified ?? []
   const isAnswer = !message.content.startsWith('(No answer')
-  const docs = [...new Map(message.sources.map((s) => [s.doc_id, s])).values()]
+  const hasSources = message.sources.length > 0
 
   return (
     <div>
@@ -260,7 +271,7 @@ function Answer({
           remarkPlugins={[remarkGfm]}
           components={{
             a({ href, children }: { href?: string; children?: ReactNode }) {
-              const m = href?.match(/^#cite-(\d+)-(\d+)$/)
+              const m = href?.match(/^#cite-(\d+)-(\d+)-(.*)$/)
               if (!m) {
                 return (
                   <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
@@ -268,26 +279,39 @@ function Answer({
                   </a>
                 )
               }
-              const cite = { docId: Number(m[1]), page: Number(m[2]) }
-              // Once the answer is complete, only citations the server confirmed against
-              // the documents it actually read get a link.
-              if (!streaming && message.checked && !confirmed.has(`${cite.docId}:${cite.page}`)) {
+              const cite: Cite = { docId: Number(m[1]), page: Number(m[2]), quote: decodeURIComponent(m[3]) || undefined }
+              const source = byMarker.get(`${cite.docId}:${cite.page}:${cite.quote ?? ''}`)
+              // Once the answer is complete, only markers the server matched to a page the
+              // assistant really read get a link.
+              if (!streaming && message.checked && !source) {
                 return <span className="text-sm text-muted-foreground">(page could not be confirmed)</span>
               }
+              const title = titles.get(cite.docId)
+              const wordingMissing = source?.unconfirmed
               return (
-                <button
-                  onClick={() => onCite(cite)}
-                  title={titles.get(cite.docId)}
-                  className="marker mx-0.5 cursor-pointer text-[0.8125em] font-medium whitespace-nowrap hover:brightness-95"
-                >
-                  p.{cite.page}
-                  <span className="sr-only"> of {titles.get(cite.docId) ?? `document ${cite.docId}`}</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => onCite(wordingMissing ? { ...cite, quote: undefined } : cite)}
+                    title={[title && `${title}, page ${cite.page}`, cite.quote && !wordingMissing && `“${cite.quote}”`]
+                      .filter(Boolean)
+                      .join('\n')}
+                    aria-label={`Source ${source?.n ?? ''}: ${title ?? 'document'}, page ${cite.page}`}
+                    className={cn(
+                      'mx-0.5 cursor-pointer text-[0.75em] font-semibold whitespace-nowrap tabular-nums hover:brightness-95',
+                      wordingMissing ? 'underline decoration-dotted underline-offset-2' : 'marker px-[0.4em]',
+                    )}
+                  >
+                    {source ? source.n : `p. ${cite.page}`}
+                  </button>
+                  {wordingMissing && (
+                    <span className="text-sm text-muted-foreground"> (these exact words are not on that page)</span>
+                  )}
+                </>
               )
             },
           }}
         >
-          {linkCitations(message.content)}
+          {linkCitations(message.content, streaming)}
         </ReactMarkdown>
       </div>
 
@@ -298,16 +322,16 @@ function Answer({
         </p>
       )}
 
-      {!streaming && message.checked && isAnswer && (docs.length === 0 || unverified.length > 0) && (
+      {!streaming && message.checked && isAnswer && (!hasSources || unverified.length > 0) && (
         <div role="note" className="mt-5 max-w-[68ch] border-l-2 border-stamp bg-card px-4 py-3 text-sm">
-          {docs.length === 0 && (
+          {!hasSources && (
             <p>
               <span className="font-medium">No document backs this answer.</span> It does not point to any page in
               your archive, so do not rely on it for facts.
             </p>
           )}
           {unverified.length > 0 && (
-            <p className={docs.length === 0 ? 'mt-2' : undefined}>
+            <p className={!hasSources ? 'mt-2' : undefined}>
               <span className="font-medium">
                 {unverified.length === 1 ? 'One number is' : `${unverified.length} numbers are`} not written in the
                 pages it read:
@@ -320,21 +344,35 @@ function Answer({
         </div>
       )}
 
-      {docs.length > 0 && (
-        <div className="mt-5 border-t pt-3 text-sm">
-          <span className="text-muted-foreground">From </span>
-          {docs.map((s, i) => (
-            <span key={s.doc_id}>
-              {i > 0 && <span className="text-muted-foreground">, </span>}
-              <button
-                onClick={() => onCite({ docId: s.doc_id, page: s.page })}
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                {s.title}
-              </button>
-            </span>
-          ))}
-        </div>
+      {!streaming && hasSources && (
+        <section className="mt-5 max-w-[68ch] border-t pt-3" aria-label="Where this answer comes from">
+          <h3 className="text-sm font-semibold">Where this comes from</h3>
+          <ol className="mt-2 space-y-2">
+            {message.sources.map((s, i) => (
+              <li key={i}>
+                <button
+                  onClick={() => onCite({ docId: s.doc_id, page: s.page, quote: s.unconfirmed ? undefined : s.quote })}
+                  className="group flex w-full items-baseline gap-2 text-left"
+                >
+                  <span className="marker shrink-0 px-[0.4em] text-xs font-semibold tabular-nums">{i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="text-sm font-medium text-primary underline-offset-4 group-hover:underline">
+                      {s.title}, page {s.page}
+                    </span>
+                    {s.quote && !s.unconfirmed && (
+                      <span className="block font-serif text-sm leading-relaxed text-muted-foreground">“{s.quote}”</span>
+                    )}
+                    {s.unconfirmed && (
+                      <span className="block text-sm text-muted-foreground">
+                        The exact words quoted were not found on this page. Check it yourself.
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
     </div>
   )
@@ -366,19 +404,21 @@ function PagePeek({ cite, onClose }: { cite: Cite | null; onClose: () => void })
       <SheetContent className="w-full gap-0 sm:max-w-xl data-[side=right]:sm:max-w-xl">
         <SheetHeader className="border-b">
           <SheetTitle className="pr-8">{title || 'Source'}</SheetTitle>
-          <SheetDescription>{cite ? `Page ${cite.page}: the picture, then the text read from it` : ''}</SheetDescription>
+          <SheetDescription>
+            {cite ? `Page ${cite.page}${cite.quote ? '. The words the answer relies on are highlighted.' : ''}` : ''}
+          </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {error ? (
             <p className="text-sm text-muted-foreground">{error}</p>
           ) : page && cite ? (
             <>
+              <PageText text={page.text} quote={cite.quote} />
               <img
                 src={`/api/documents/${cite.docId}/pages/${cite.page}/image`}
-                alt={`Scan of page ${cite.page}`}
-                className="mb-4 w-full border bg-white"
+                alt={`Picture of page ${cite.page}`}
+                className="mt-4 w-full border bg-white"
               />
-              <div className="ocr-text">{page.text}</div>
             </>
           ) : (
             <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Loading page" />
@@ -387,7 +427,7 @@ function PagePeek({ cite, onClose }: { cite: Cite | null; onClose: () => void })
         {cite && !error && (
           <div className="border-t p-4">
             <Link
-              to={`/documents/${cite.docId}#p${cite.page}`}
+              to={`/documents/${cite.docId}${cite.quote ? `?quote=${encodeURIComponent(cite.quote)}` : ''}#p${cite.page}`}
               className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
               <ExternalLink className="size-3.5" aria-hidden /> Open the whole document

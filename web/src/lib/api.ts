@@ -53,7 +53,15 @@ export type Hit = {
   snippet: string
 }
 
-export type Source = { doc_id: number; page: number; title: string }
+export type Source = {
+  doc_id: number
+  page: number
+  title: string
+  /** The words on that page the answer relies on. */
+  quote?: string
+  /** True when the quoted words were not found on the page. */
+  unconfirmed?: boolean
+}
 
 export type ChatMessage = {
   id?: number

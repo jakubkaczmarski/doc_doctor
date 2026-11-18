@@ -32,3 +32,45 @@ func TestUnverifiedFigures(t *testing.T) {
 		}
 	}
 }
+
+func TestQuoteOnPage(t *testing.T) {
+	page := normalizeText("§ 3. Okres obowiązywania\nUmowa zostaje zawarta na czas określony do dnia 28 lutego 2030 r.\n| 1 | Papier ksero A4 80g | 40 ryz | 18,50 zł |\nDo  zapłaty:\t2 628,51 zł")
+	ok := []string{
+		"do dnia 28 lutego 2030 r.",
+		"Umowa zostaje zawarta na czas określony",
+		"UMOWA ZOSTAJE ZAWARTA",
+		"Do zapłaty: 2 628,51 zł",
+		"Papier ksero A4 80g | 40 ryz",
+		"Papier ksero A4 80g 40 ryz 18,50 zł",
+		"Umowa zostaje zawarta ... do dnia 28 lutego 2030",
+		"**Okres** obowiązywania",
+	}
+	for _, q := range ok {
+		if !quoteOnPage(q, page) {
+			t.Errorf("should be found: %q", q)
+		}
+	}
+	bad := []string{
+		"do dnia 28 lutego 2031 r.",
+		"The lease runs until 28 February 2030",
+		"Do zapłaty: 2 682,51 zł",
+		"do dnia 28 lutego ... Umowa zostaje zawarta", // parts out of order
+		"...",
+	}
+	for _, q := range bad {
+		if quoteOnPage(q, page) {
+			t.Errorf("should not be found: %q", q)
+		}
+	}
+}
+
+func TestCitationMarkers(t *testing.T) {
+	m := citeRe.FindAllStringSubmatch(`Ends 2030 [3:2 "do dnia 28 lutego 2030 r."]. Total [1:1]. Polish quotes [2:1 „Do zapłaty: 565,80 zł”].`, -1)
+	if len(m) != 3 || m[0][3] != "do dnia 28 lutego 2030 r." || m[1][3] != "" || m[2][3] != "Do zapłaty: 565,80 zł" {
+		t.Fatalf("unexpected parse: %q", m)
+	}
+	// Quoted text must not be treated as figures stated by the answer.
+	if got := unverifiedFigures(`It ends then [3:2 "do dnia 28 lutego 2030 r."].`, newNumberIndex()); len(got) != 0 {
+		t.Errorf("figures inside quotes were flagged: %v", got)
+	}
+}

@@ -58,7 +58,10 @@ How to work:
 
 How to answer:
 - Reply in the language of the question. Lead with the answer, then the supporting detail.
-- Cite the page behind each fact with a marker of the form [doc_id:page], for example [42:3], placed right after the sentence it supports. Use the ids and page numbers exactly as the tools returned them. Facts taken from list_documents or aggregate_documents have no page; cite the document as [doc_id:1] when you name a specific one. When a fact comes from the business profile rather than a document, say "according to your business profile" instead of citing a page.
+- Show where each fact comes from with a marker placed right after the sentence it supports, in the form [doc_id:page "exact words"], for example [42:3 "termin płatności 14 dni"]. The quoted part is the few words on that page that state the fact, copied exactly as the tool returned them: same language, same spelling, same numbers, no more than about 12 words, in straight double quotes. The app shows the reader that passage highlighted on the page and checks it against the page text, so a paraphrased, translated or tidied-up quote is displayed as not found. Quote from search snippets only without the ** markers. If the supporting words are spread out, cite the most important part and add a second marker for the rest.
+- Use the ids and page numbers exactly as the tools returned them, and only cite pages whose text you have actually seen in a tool result.
+- Facts taken from list_documents or aggregate_documents have no page text; cite the document as [doc_id:1] without a quote when you name a specific one. When a fact comes from the business profile rather than a document, say "according to your business profile" instead of adding a marker.
+- Name the document in the sentence when it helps the reader ("the lease with Nieruchomości Bałtyk says..."), so the answer reads clearly even before they open a marker.
 - Keep amounts in their original currency and never add up different currencies.`
 
 func tool(name, desc string, props map[string]any, required ...string) anthropic.BetaToolUnionParam {
@@ -241,7 +244,8 @@ func companyContext(orgName, profile string) string {
 	return ctx + "\n\nBusiness profile, written by the owner:\n<business_profile>\n" + strings.TrimSpace(profile) + "\n</business_profile>"
 }
 
-var citeRe = regexp.MustCompile(`\[(\d+):(\d+)\]`)
+// A citation marker: [doc:page] or [doc:page "quoted words"].
+var citeRe = regexp.MustCompile(`\[(\d+):(\d+)(?:\s*["“„]([^"”\]]{1,400})["”])?\]`)
 
 // Answer runs one user turn. history holds the earlier turns as plain text. Text is
 // streamed through emit; the full answer and the sources it cites are returned.
@@ -341,14 +345,27 @@ func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string
 	final := strings.TrimSpace(answer.String())
 	res := Result{Answer: final, Sources: []store.Source{}}
 	dedup := map[string]bool{}
+	pageText := map[[2]int64]string{} // normalised text of each cited page, loaded once
 	for _, m := range citeRe.FindAllStringSubmatch(final, -1) {
 		id, _ := strconv.ParseInt(m[1], 10, 64)
 		page, _ := strconv.Atoi(m[2])
-		if dedup[m[0]] || !r.pages[[2]int64{id, int64(page)}] {
+		key := [2]int64{id, int64(page)}
+		if dedup[m[0]] || !r.pages[key] {
 			continue
 		}
 		dedup[m[0]] = true
-		res.Sources = append(res.Sources, store.Source{DocID: id, Page: page, Title: r.seen[id]})
+		src := store.Source{DocID: id, Page: page, Title: r.seen[id], Quote: strings.TrimSpace(m[3])}
+		if src.Quote != "" {
+			text, ok := pageText[key]
+			if !ok {
+				if pages, err := a.Store.GetPages(ctx, orgID, id, page, page); err == nil && len(pages) == 1 {
+					text = normalizeText(pages[0].Text)
+				}
+				pageText[key] = text
+			}
+			src.Unconfirmed = !quoteOnPage(src.Quote, text)
+		}
+		res.Sources = append(res.Sources, src)
 	}
 	res.Unverified = unverifiedFigures(final, r.nums)
 	return res, nil

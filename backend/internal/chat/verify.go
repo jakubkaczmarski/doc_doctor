@@ -10,6 +10,7 @@ import (
 // The model is told to answer only from the archive, but an instruction is not a
 // guarantee. After each answer we check two things mechanically:
 //   - every [doc:page] citation points at a page a tool actually returned this turn;
+//   - every quoted passage really is on the page it is attributed to;
 //   - every figure in the answer appears in the material the model was shown.
 // Anything that fails is surfaced to the user rather than silently trusted.
 
@@ -105,4 +106,34 @@ func unverifiedFigures(answer string, idx *numberIndex) []string {
 		out = append(out, m)
 	}
 	return out
+}
+
+// normalizeText makes page text and quotes comparable: case and spacing differences,
+// Markdown table bars and search-snippet markers do not count as a mismatch.
+func normalizeText(s string) string {
+	s = strings.NewReplacer("**", "", "|", " ", "\u00a0", " ", "’", "'", "–", "-", "—", "-").Replace(s)
+	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+}
+
+// quoteOnPage reports whether the quoted words occur on the page. A quote may skip
+// text with "..." and each part must then appear, in order.
+func quoteOnPage(quote, normalizedPage string) bool {
+	if normalizedPage == "" {
+		return false
+	}
+	rest := normalizedPage
+	found := false
+	for _, part := range strings.Split(strings.ReplaceAll(quote, "…", "..."), "...") {
+		part = strings.Trim(normalizeText(part), " .,;:")
+		if part == "" {
+			continue
+		}
+		i := strings.Index(rest, part)
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len(part):]
+		found = true
+	}
+	return found
 }
