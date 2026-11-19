@@ -39,6 +39,12 @@ export type Doc = {
   fields: Field[]
   created_at: string
   processed_at: string | null
+  /** Fields the user set by hand (doc_type, category, title, subject). */
+  user_set: string[]
+  /** The user's own description of the document. */
+  user_note: string
+  /** False when automatic detection was not confident about the type. */
+  type_sure: boolean
 }
 
 export type Page = { page_no: number; text: string; confidence: number | null; engine: string }
@@ -133,14 +139,18 @@ export const api = {
   deleteDocument: (id: number) => request<{ ok: boolean }>(`/documents/${id}`, { method: 'DELETE' }),
   reprocess: (id: number, ocr: 'local' | 'claude' | 'auto') =>
     request<{ ok: boolean }>(`/documents/${id}/reprocess`, json({ ocr })),
-  upload: (files: File[]) => {
+  correct: (id: number, change: { doc_type?: string; category?: string; title?: string; subject?: string; note?: string }) =>
+    request<{ document: Doc }>(`/documents/${id}`, { ...json(change), method: 'PATCH' }),
+  upload: (files: File[], said?: Said) => {
     const form = new FormData()
+    appendSaid(form, said)
     files.forEach((f) => form.append('files', f))
     return request<{ results: UploadResult[] }>('/documents', { method: 'POST', body: form })
   },
   /** Uploads page photos, in order, as one multi-page document. */
-  uploadScan: (pages: File[], name: string) => {
+  uploadScan: (pages: File[], name: string, said?: Said) => {
     const form = new FormData()
+    appendSaid(form, said)
     form.append('combine', '1') // must precede the files
     form.append('name', name)
     pages.forEach((f) => form.append('files', f))
@@ -206,7 +216,36 @@ export async function streamChat(
   }
 }
 
-export const docTypes = ['invoice', 'receipt', 'contract', 'letter', 'form', 'report', 'other'] as const
+export const docTypes = [
+  'invoice',
+  'receipt',
+  'contract',
+  'letter',
+  'form',
+  'report',
+  'statement',
+  'order',
+  'delivery_note',
+  'payslip',
+  'certificate',
+  'other',
+] as const
+
+/** True when the system could not tell what a document is and the user has not said. */
+export function needsSorting(d: Doc) {
+  if (d.status !== 'ready' || d.user_set.includes('doc_type')) return false
+  return d.doc_type === 'unknown' || d.doc_type === 'other' || !d.type_sure
+}
+
+/** What the user says a document is, sent with an upload. */
+export type Said = { type?: string; category?: string; note?: string }
+
+function appendSaid(form: FormData, said?: Said) {
+  // These fields must precede the files in the form.
+  if (said?.type) form.append('doc_type', said.type)
+  if (said?.category) form.append('category', said.category)
+  if (said?.note?.trim()) form.append('note', said.note.trim())
+}
 
 export const categoryKeys = [
   'purchases',

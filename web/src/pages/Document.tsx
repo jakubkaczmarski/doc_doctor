@@ -5,6 +5,7 @@ import { ArrowLeft, Download, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PageText } from '@/components/PageText'
 import { StatusMark } from '@/components/StatusMark'
+import { WhatIsThis } from '@/components/WhatIsThis'
 import { api, categoryLabel, noteText, readability, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
 import { t, tn } from '@/lib/i18n'
 import { useSession } from '@/lib/session'
@@ -87,6 +88,7 @@ export default function DocumentPage() {
     [t('doc.factType'), typeLabel(doc.doc_type)],
     [t('doc.factRelates'), categoryLabel(doc.category)],
     [t('doc.factAbout'), doc.subject],
+    [t('doc.factNote'), doc.user_note],
     [t('doc.factDated'), formatDate(doc.doc_date)],
     [t('doc.factCounterparty'), doc.counterparty],
     [t('doc.factAmount'), formatAmount(doc.total_amount, doc.currency)],
@@ -157,6 +159,8 @@ export default function DocumentPage() {
         {doc.notice && (
           <p className="mb-6 max-w-3xl border-l-2 border-input bg-card px-4 py-3 text-sm text-muted-foreground">{noteText(doc.notice)}</p>
         )}
+
+        {doc.status === 'ready' && <WhatIsThis key={`${doc.id}-${doc.doc_type}-${doc.category}`} doc={doc} onSaved={setDoc} />}
 
         {(doc.summary || facts.length > 0) && (
           <section className="mb-8 max-w-3xl">

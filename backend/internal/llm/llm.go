@@ -168,7 +168,20 @@ const analyzePrompt = `You are indexing a scanned business document for a compan
 The OCR text is below; it may contain recognition errors. Extract the metadata.
 
 Guidance:
-- doc_type: what kind of document it is: invoice, receipt, contract, letter, form, report, or other.
+- doc_type: what kind of document it is. Pick the most specific that fits:
+  invoice (a bill for goods or services, including pro forma and correction invoices),
+  receipt (proof of a payment already made: till receipt, payment confirmation),
+  contract (an agreement between parties, including annexes and amendments),
+  letter (correspondence: a notice, reminder, demand, reply or cover letter),
+  form (a filled-in form, application or declaration, including tax returns),
+  report (a report, summary, minutes or financial statement),
+  statement (a bank or account statement, or a list of transactions),
+  order (a purchase order, quote, offer or order confirmation),
+  delivery_note (a delivery or goods-received note, waybill),
+  payslip (a payslip or payroll list),
+  certificate (a certificate, licence, permit, registration extract or policy document),
+  other (only when none of the above fits).
+- type_confidence: "high" when the document clearly is that type, for example it names itself or has the unmistakable layout. "low" when the text is too short, too garbled or too ambiguous to be sure, when two types fit about equally, or when you chose "other". The archive owner is asked to confirm documents marked low, so be honest rather than optimistic: a wrong type filed with confidence is worse than a question.
 - category: the area of the business it relates to. purchases (things the company buys: supplier invoices, receipts, orders), sales (things it sells: its own invoices, customer orders, quotes), premises (rent, lease, utilities, building matters), banking (accounts, loans, statements, leasing), taxes (tax office, VAT, social insurance filings and correspondence), payroll_hr (employment contracts, payslips, leave, staff matters), insurance, legal (disputes, court, powers of attorney, company registry), vehicles, it_telecom (software, hardware, phone, internet), administration (permits, official notices, general office paperwork), or other. Use the company context to tell purchases from sales: an invoice issued by the company is sales, one addressed to it is purchases.
 - subject: one short phrase, in the document's language, saying what it is about, specific enough to tell it from similar documents (e.g. "Najem biura, ul. Świętojańska 4" or "Paper and toner, October order"). No more than about 8 words.
 - title: a short specific title a person would recognise in a list, in the document's language (e.g. "Invoice FV/2026/031 – Acme Sp. z o.o.").
@@ -177,15 +190,18 @@ Guidance:
 - doc_date: the document's own date (issue or signing date) as YYYY-MM-DD, or "" if absent.
 - counterparty: the other party from the archive owner's point of view (the vendor on an invoice or receipt, the other signatory on a contract, the sender of a letter). Use the name as written, or "" if unclear.
 - total_amount and currency: the gross total payable for invoices and receipts, or the main contract value if one is stated; otherwise null and "". currency is an ISO 4217 code.
+- The company section may list how the owner filed earlier documents by hand. Treat those as the house rules: when this document is the same kind of thing from the same party, file it the same way, even if you would have chosen differently.
+- The company section may also include what the owner said about this very document. Their description tells you what it is; use it for the type, area, title and subject unless the text plainly contradicts it.
 - tags: 2-6 lowercase topical keywords.
 - fields: other facts worth looking up later as name/value pairs, e.g. invoice number, tax IDs, net amount, VAT amount, due date, payment terms, bank account, contract term, notice period, governing law, reference numbers. Use values exactly as written in the document. Only include what is actually present.`
 
 var analysisSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
-  "required": ["doc_type","category","subject","title","summary","language","doc_date","counterparty","total_amount","currency","tags","fields"],
+  "required": ["doc_type","type_confidence","category","subject","title","summary","language","doc_date","counterparty","total_amount","currency","tags","fields"],
   "properties": {
-    "doc_type": {"type": "string", "enum": ["invoice","receipt","contract","letter","form","report","other"]},
+    "doc_type": {"type": "string", "enum": ["invoice","receipt","contract","letter","form","report","statement","order","delivery_note","payslip","certificate","other"]},
+    "type_confidence": {"type": "string", "enum": ["high","low"]},
     "category": {"type": "string", "enum": ["purchases","sales","premises","banking","taxes","payroll_hr","insurance","legal","vehicles","it_telecom","administration","other"]},
     "subject": {"type": "string"},
     "title": {"type": "string"},
@@ -207,6 +223,8 @@ var analysisSchema = json.RawMessage(`{
 //
 // company is the archive owner's name and profile, so the model can tell which party
 // "we" are (who the counterparty is, and whether an invoice is a purchase or a sale).
+// It may also carry how the owner filed earlier documents and what they said about
+// this one; the prompt tells the model how much weight those get.
 func (c *Client) Analyze(ctx context.Context, company, filename, fullText string) (*store.Analysis, error) {
 	body := fullText
 	if r := []rune(body); len(r) > MaxAnalyzeChars {

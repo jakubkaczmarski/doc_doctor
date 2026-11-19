@@ -15,8 +15,8 @@ import {
   docTypes,
   formatAmount,
   formatDate,
+  needsSorting,
   typeLabel,
-  typesLabel,
   type Doc,
   type Hit,
 } from '@/lib/api'
@@ -32,6 +32,7 @@ export default function DocumentsPage() {
   const [query, setQuery] = useState('')
   const [type, setType] = useState('')
   const [category, setCategory] = useState('')
+  const [onlyUnsure, setOnlyUnsure] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
   const [phoneLink, setPhoneLink] = useState<{ url: string; minutes: number } | null>(null)
   const { capabilities } = useSession()
@@ -108,6 +109,9 @@ export default function DocumentsPage() {
     }
   }
   const empty = docs !== null && docs.length === 0 && hits.length === 0
+  // Documents the system was unsure about, so the user can go through them in one pass.
+  const unsure = docs?.filter(needsSorting).length ?? 0
+  const shown = docs && onlyUnsure && unsure > 0 ? docs.filter(needsSorting) : docs
 
   return (
     <div
@@ -159,21 +163,22 @@ export default function DocumentsPage() {
       </header>
 
       <div className="mt-5 flex flex-wrap items-center gap-1.5" role="group" aria-label={t('docs.filterAria')}>
-        {['', ...docTypes].map((type_) => (
-          <button
-            key={type_ || 'all'}
-            onClick={() => setType(type_)}
-            aria-pressed={type === type_}
-            className={cn(
-              'rounded-full border px-3 py-1 text-sm transition-colors',
-              type === type_
-                ? 'border-ink bg-ink text-white'
-                : 'border-border bg-card text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {type_ ? typesLabel(type_) : t('docs.all')}
-          </button>
-        ))}
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          aria-label={t('docs.typeAria')}
+          className={cn(
+            'h-[1.875rem] rounded-full border bg-card px-3 text-sm',
+            type ? 'border-ink text-foreground' : 'text-muted-foreground',
+          )}
+        >
+          <option value="">{t('docs.anyType')}</option>
+          {docTypes.map((value) => (
+            <option key={value} value={value}>
+              {typeLabel(value)}
+            </option>
+          ))}
+        </select>
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
@@ -190,6 +195,19 @@ export default function DocumentsPage() {
             </option>
           ))}
         </select>
+        {unsure > 0 && (
+          <button
+            onClick={() => setOnlyUnsure((v) => !v)}
+            aria-pressed={onlyUnsure}
+            title={t('docs.toSortAria')}
+            className={cn(
+              'rounded-full border px-3 py-1 text-sm font-medium transition-colors',
+              onlyUnsure ? 'border-primary bg-primary text-primary-foreground' : 'border-primary bg-card text-primary',
+            )}
+          >
+            {tn('docs.toSort', unsure)}
+          </button>
+        )}
       </div>
 
       {hits.length > 0 && (
@@ -261,7 +279,7 @@ export default function DocumentsPage() {
             {hits.length > 0 && <h2 className="mb-2 text-sm font-semibold">{t('docs.matching')}</h2>}
             {/* Phone: stacked rows */}
             <ul className="divide-y border-y bg-card md:hidden">
-              {docs.map((d) => (
+              {(shown ?? []).map((d) => (
                 <li key={d.id}>
                   <Link to={`/documents/${d.id}`} className="flex items-start gap-3 px-4 py-3 active:bg-accent/50">
                     <div className="min-w-0 flex-1">
@@ -270,7 +288,11 @@ export default function DocumentsPage() {
                         {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : '')}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                        <span>{typeLabel(d.doc_type)}</span>
+                        {needsSorting(d) ? (
+                          <span className="marker font-medium text-foreground">{t('docs.whatIsThis')}</span>
+                        ) : (
+                          <span>{typeLabel(d.doc_type)}</span>
+                        )}
                         {categoryLabel(d.category) && <span>{categoryLabel(d.category)}</span>}
                         {d.doc_date && <span className="tabular-nums">{formatDate(d.doc_date)}</span>}
                       </div>
@@ -300,7 +322,7 @@ export default function DocumentsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {docs.map((d) => (
+                  {(shown ?? []).map((d) => (
                     <tr key={d.id} className="group relative hover:bg-accent/50">
                       <td className="max-w-0 w-full px-4 py-3">
                         <Link to={`/documents/${d.id}`} className="block truncate font-medium after:absolute after:inset-0">
@@ -310,7 +332,13 @@ export default function DocumentsPage() {
                           {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : d.page_count ? tn('pages', d.page_count) : '')}
                         </div>
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{typeLabel(d.doc_type)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
+                        {needsSorting(d) ? (
+                          <span className="marker font-medium text-foreground">{t('docs.whatIsThis')}</span>
+                        ) : (
+                          typeLabel(d.doc_type)
+                        )}
+                      </td>
                       <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{categoryLabel(d.category)}</td>
                       <td className="px-3 py-3 whitespace-nowrap text-muted-foreground tabular-nums">
                         {formatDate(d.doc_date)}

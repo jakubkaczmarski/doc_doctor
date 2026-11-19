@@ -60,12 +60,22 @@ incoming connections for the server the first time.
 ## Classification
 
 Every document is filed with a **type** (invoice, receipt, contract, letter, form,
-report, other), the **business area** it relates to (purchases, sales, premises,
-banking, taxes, payroll and HR, insurance, legal, vehicles, IT and telecom,
-administration, other) and a one-line **subject**. With a Claude key this comes from
-Claude, which also sees the company name and business info so it can tell a purchase
-from a sale. Without a key, or if that call fails, type and area are guessed from
-keywords (Polish, English, German) and the document says so.
+report, statement, order or quote, delivery note, payslip, certificate or permit, other),
+the **business area** it relates to (purchases, sales, premises, banking, taxes, payroll
+and HR, insurance, legal, vehicles, IT and telecom, administration, other) and a one-line
+**subject**.
+
+- **Detection.** With a Claude key this comes from Claude, which also sees the company
+  name and business info so it can tell a purchase from a sale. It reports whether it is
+  sure; "other" always counts as unsure. Without a key, or if that call fails, type and
+  area are guessed from keywords (Polish, English, German) and treated as unsure.
+- **When it is unsure**, the document shows "What is this?" in the list and a prompt on
+  its page: confirm the guess with one tap, or pick the type and area and add a note in
+  your own words. A "to check" filter lists all such documents.
+- **Saying it up front.** The Scan screen has an optional "Say what it is" step.
+- **Corrections stick and teach.** Fields set by hand (`user_set`) are never overwritten
+  by a re-read, and the most recent hand-filed documents are passed to Claude as house
+  rules, so similar documents from the same party are filed the same way next time.
 
 ## Languages
 

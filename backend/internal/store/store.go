@@ -214,17 +214,24 @@ type Document struct {
 	Fields        []Field    `json:"fields"`
 	CreatedAt     time.Time  `json:"created_at"`
 	ProcessedAt   *time.Time `json:"processed_at"`
+	// UserSet lists fields the user set by hand; UserNote is their description.
+	UserSet  []string `json:"user_set"`
+	UserNote string   `json:"user_note"`
+	// TypeSure is false when automatic detection was not confident about the type.
+	TypeSure bool `json:"type_sure"`
 }
 
 const docCols = `id, org_id, filename, mime, size_bytes, sha256, storage_key, status, stage, error, notice,
 	ocr_request, ocr_engine, ocr_confidence, page_count, doc_type, category, subject, title, summary, language,
-	to_char(doc_date, 'YYYY-MM-DD'), counterparty, total_amount::float8, currency, tags, fields, created_at, processed_at`
+	to_char(doc_date, 'YYYY-MM-DD'), counterparty, total_amount::float8, currency, tags, fields, created_at, processed_at,
+	user_set, user_note, type_sure`
 
 func scanDoc(row pgx.Row) (Document, error) {
 	var d Document
 	err := row.Scan(&d.ID, &d.OrgID, &d.Filename, &d.Mime, &d.SizeBytes, &d.SHA256, &d.StorageKey, &d.Status, &d.Stage, &d.Error, &d.Notice,
 		&d.OCRRequest, &d.OCREngine, &d.OCRConfidence, &d.PageCount, &d.DocType, &d.Category, &d.Subject, &d.Title, &d.Summary, &d.Language,
-		&d.DocDate, &d.Counterparty, &d.TotalAmount, &d.Currency, &d.Tags, &d.Fields, &d.CreatedAt, &d.ProcessedAt)
+		&d.DocDate, &d.Counterparty, &d.TotalAmount, &d.Currency, &d.Tags, &d.Fields, &d.CreatedAt, &d.ProcessedAt,
+		&d.UserSet, &d.UserNote, &d.TypeSure)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -234,15 +241,29 @@ func scanDoc(row pgx.Row) (Document, error) {
 	if d.Fields == nil {
 		d.Fields = []Field{}
 	}
+	if d.UserSet == nil {
+		d.UserSet = []string{}
+	}
 	return d, err
 }
 
 // InsertDocument stores a new upload. If the same file (by hash) already exists for the
 // org, the existing row is returned with created=false.
 func (s *Store) InsertDocument(ctx context.Context, d Document) (doc Document, created bool, err error) {
-	doc, err = scanDoc(s.DB.QueryRow(ctx, `INSERT INTO documents (org_id, filename, mime, size_bytes, sha256, storage_key, ocr_request, title)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$2) ON CONFLICT (org_id, sha256) DO NOTHING RETURNING `+docCols,
-		d.OrgID, d.Filename, d.Mime, d.SizeBytes, d.SHA256, d.StorageKey, d.OCRRequest))
+	// Anything the uploader said about the document is recorded as set by hand.
+	userSet := []string{}
+	if d.DocType == "" {
+		d.DocType = "unknown"
+	} else {
+		userSet = append(userSet, "doc_type")
+	}
+	if d.Category != "" {
+		userSet = append(userSet, "category")
+	}
+	doc, err = scanDoc(s.DB.QueryRow(ctx, `INSERT INTO documents (org_id, filename, mime, size_bytes, sha256, storage_key, ocr_request, title,
+			doc_type, category, user_note, user_set)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$2,$8,$9,$10,$11) ON CONFLICT (org_id, sha256) DO NOTHING RETURNING `+docCols,
+		d.OrgID, d.Filename, d.Mime, d.SizeBytes, d.SHA256, d.StorageKey, d.OCRRequest, d.DocType, d.Category, d.UserNote, userSet))
 	if err == nil {
 		return doc, true, nil
 	}
@@ -281,7 +302,7 @@ func (f DocFilter) where(orgID int64) (string, []any) {
 		conds = append(conds, strings.ReplaceAll(cond, "?", fmt.Sprintf("$%d", len(args))))
 	}
 	if f.Text != "" {
-		add(`(unaccent(title) ILIKE unaccent(?) OR unaccent(filename) ILIKE unaccent(?) OR unaccent(counterparty) ILIKE unaccent(?) OR unaccent(summary) ILIKE unaccent(?) OR unaccent(subject) ILIKE unaccent(?) OR category ILIKE ? OR unaccent(array_to_string(tags, ' ')) ILIKE unaccent(?))`, "%"+f.Text+"%")
+		add(`(unaccent(title) ILIKE unaccent(?) OR unaccent(filename) ILIKE unaccent(?) OR unaccent(counterparty) ILIKE unaccent(?) OR unaccent(summary) ILIKE unaccent(?) OR unaccent(subject) ILIKE unaccent(?) OR unaccent(user_note) ILIKE unaccent(?) OR category ILIKE ? OR unaccent(array_to_string(tags, ' ')) ILIKE unaccent(?))`, "%"+f.Text+"%")
 	}
 	if f.DocType != "" {
 		add(`doc_type = ?`, f.DocType)
@@ -446,18 +467,20 @@ func (s *Store) ReplacePages(ctx context.Context, d Document, pages []Page, engi
 
 // Analysis is the metadata extracted from a document's text.
 type Analysis struct {
-	DocType      string   `json:"doc_type"`
-	Category     string   `json:"category"`
-	Subject      string   `json:"subject"`
-	Title        string   `json:"title"`
-	Summary      string   `json:"summary"`
-	Language     string   `json:"language"`
-	DocDate      string   `json:"doc_date"`     // YYYY-MM-DD or ""
-	Counterparty string   `json:"counterparty"` // or ""
-	TotalAmount  *float64 `json:"total_amount"`
-	Currency     string   `json:"currency"`
-	Tags         []string `json:"tags"`
-	Fields       []Field  `json:"fields"`
+	DocType string `json:"doc_type"`
+	// TypeConfidence is "high" or "low"; low makes the interface ask the user.
+	TypeConfidence string   `json:"type_confidence"`
+	Category       string   `json:"category"`
+	Subject        string   `json:"subject"`
+	Title          string   `json:"title"`
+	Summary        string   `json:"summary"`
+	Language       string   `json:"language"`
+	DocDate        string   `json:"doc_date"`     // YYYY-MM-DD or ""
+	Counterparty   string   `json:"counterparty"` // or ""
+	TotalAmount    *float64 `json:"total_amount"`
+	Currency       string   `json:"currency"`
+	Tags           []string `json:"tags"`
+	Fields         []Field  `json:"fields"`
 }
 
 func (s *Store) FinishDocument(ctx context.Context, id int64, a *Analysis, notice string) error {
@@ -475,11 +498,93 @@ func (s *Store) FinishDocument(ctx context.Context, id int64, a *Analysis, notic
 	if a.Fields == nil {
 		a.Fields = []Field{}
 	}
+	// Fields the user set by hand win over detection, including on a re-read.
 	_, err := s.DB.Exec(ctx, `UPDATE documents SET status='ready', stage='', notice=$2, processed_at=now(), updated_at=now(),
-		doc_type=$3, title=CASE WHEN $4='' THEN filename ELSE $4 END, summary=$5, language=$6, doc_date=$7::date,
-		counterparty=$8, total_amount=$9, currency=$10, tags=$11, fields=$12, category=$13, subject=$14 WHERE id=$1`,
-		id, notice, a.DocType, a.Title, a.Summary, a.Language, date, a.Counterparty, a.TotalAmount, strings.ToUpper(a.Currency), a.Tags, a.Fields, a.Category, a.Subject)
+		doc_type  = CASE WHEN 'doc_type' = ANY(user_set) THEN doc_type ELSE $3 END,
+		type_sure = CASE WHEN 'doc_type' = ANY(user_set) THEN true ELSE $15 END,
+		category  = CASE WHEN 'category' = ANY(user_set) THEN category ELSE $13 END,
+		title     = CASE WHEN 'title' = ANY(user_set) THEN title WHEN $4='' THEN filename ELSE $4 END,
+		subject   = CASE WHEN 'subject' = ANY(user_set) THEN subject ELSE $14 END,
+		summary=$5, language=$6, doc_date=$7::date,
+		counterparty=$8, total_amount=$9, currency=$10, tags=$11, fields=$12 WHERE id=$1`,
+		id, notice, a.DocType, a.Title, a.Summary, a.Language, date, a.Counterparty, a.TotalAmount, strings.ToUpper(a.Currency), a.Tags, a.Fields, a.Category, a.Subject,
+		a.TypeConfidence != "low")
 	return err
+}
+
+// DocTypes and Categories are the values a document can be filed under.
+var (
+	DocTypes   = []string{"invoice", "receipt", "contract", "letter", "form", "report", "statement", "order", "delivery_note", "payslip", "certificate", "other"}
+	Categories = []string{"purchases", "sales", "premises", "banking", "taxes", "payroll_hr", "insurance", "legal", "vehicles", "it_telecom", "administration", "other"}
+)
+
+// Correction is a change the user makes to how a document is filed. Nil fields are left alone.
+type Correction struct {
+	DocType  *string `json:"doc_type"`
+	Category *string `json:"category"`
+	Title    *string `json:"title"`
+	Subject  *string `json:"subject"`
+	Note     *string `json:"note"`
+}
+
+// Correct applies the user's own classification and marks those fields as set by hand.
+func (s *Store) Correct(ctx context.Context, orgID, id int64, c Correction) (Document, error) {
+	sets, args := []string{"updated_at=now()"}, []any{orgID, id}
+	locked := []string{}
+	set := func(col string, v *string, lock bool) {
+		if v == nil {
+			return
+		}
+		args = append(args, strings.TrimSpace(*v))
+		sets = append(sets, fmt.Sprintf("%s=$%d", col, len(args)))
+		if lock {
+			locked = append(locked, col)
+		}
+	}
+	set("doc_type", c.DocType, true)
+	set("category", c.Category, true)
+	set("title", c.Title, true)
+	set("subject", c.Subject, true)
+	set("user_note", c.Note, false)
+	if len(locked) > 0 {
+		// One assignment for the whole list: SQL allows a column to be set only once.
+		args = append(args, locked)
+		sets = append(sets, fmt.Sprintf("user_set = ARRAY(SELECT DISTINCT x FROM unnest(user_set || $%d::text[]) AS x ORDER BY x)", len(args)))
+	}
+	if c.DocType != nil {
+		// The type is now known for certain, so the "guessed" note no longer applies.
+		sets = append(sets, "type_sure=true", "notice=trim(regexp_replace(' '||notice||' ', ' guessed ', ' '))")
+	}
+	return scanDoc(s.DB.QueryRow(ctx, `UPDATE documents SET `+strings.Join(sets, ", ")+` WHERE org_id=$1 AND id=$2 RETURNING `+docCols, args...))
+}
+
+// FilingExamples describes how the user has filed documents by hand, most recent first.
+// They are shown to the model so that similar documents are detected correctly next time.
+func (s *Store) FilingExamples(ctx context.Context, orgID int64, limit int) ([]string, error) {
+	rows, err := s.DB.Query(ctx, `SELECT title, counterparty, doc_type, category, user_note FROM documents
+		WHERE org_id=$1 AND status='ready' AND ('doc_type' = ANY(user_set) OR 'category' = ANY(user_set))
+		ORDER BY updated_at DESC LIMIT $2`, orgID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var title, party, docType, category, note string
+		if err := rows.Scan(&title, &party, &docType, &category, &note); err != nil {
+			return nil, err
+		}
+		line := fmt.Sprintf("- %q", title)
+		if party != "" {
+			line += " from/with " + party
+		}
+		line += fmt.Sprintf(" -> type %s, area %s", docType, category)
+		if note != "" {
+			line += fmt.Sprintf(" (owner's note: %q)", note)
+		}
+		out = append(out, line)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetPages(ctx context.Context, orgID, docID int64, from, to int) ([]Page, error) {

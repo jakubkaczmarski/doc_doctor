@@ -17,6 +17,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ const (
 	sessionTTL    = 30 * 24 * time.Hour
 	maxUploadSize = 50 << 20 // per file
 	maxScanPages  = 40       // photos that can be joined into one scanned document
+	maxNoteChars  = 500      // the user's own description of a document
 )
 
 type Server struct {
@@ -75,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/documents/{id}/file", s.getFile)
 			r.Get("/documents/{id}/pages/{page}/image", s.getPageImage)
 			r.Delete("/documents/{id}", s.deleteDocument)
+			r.Patch("/documents/{id}", s.correctDocument)
 			r.Post("/documents/{id}/reprocess", s.reprocess)
 			r.Get("/search", s.search)
 			r.Get("/conversations", s.listConversations)
@@ -389,6 +392,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	ocrRequest := ""
 	combine, scanName := false, ""
+	said := store.Document{} // what the uploader said these files are (doc_type, category, note)
 	var scanPages []ocr.File
 	results := []uploadResult{}
 	for {
@@ -404,6 +408,19 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			b, _ := io.ReadAll(io.LimitReader(part, 16))
 			if v := string(b); v == "local" || v == "claude" || v == "auto" {
 				ocrRequest = v
+			}
+			continue
+		}
+		if name := part.FormName(); name == "doc_type" || name == "category" || name == "note" {
+			b, _ := io.ReadAll(io.LimitReader(part, maxNoteChars*4))
+			v := strings.TrimSpace(string(b))
+			switch {
+			case name == "doc_type" && slices.Contains(store.DocTypes, v):
+				said.DocType = v
+			case name == "category" && slices.Contains(store.Categories, v):
+				said.Category = v
+			case name == "note" && len([]rune(v)) <= maxNoteChars:
+				said.UserNote = v
 			}
 			continue
 		}
@@ -439,7 +456,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		res := uploadResult{Filename: name}
-		doc, created, err := s.saveUpload(r.Context(), u, name, part, ocrRequest)
+		doc, created, err := s.saveUpload(r.Context(), u, name, part, ocrRequest, said)
 		switch {
 		case err != nil:
 			log.Printf("upload %s: %v", name, err)
@@ -462,7 +479,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 		name := safeScanName(i18n.Lang(r), scanName)
 		res := uploadResult{Filename: name}
-		if doc, created, err := s.saveUpload(r.Context(), u, name, bytes.NewReader(pdf), ocrRequest); err != nil {
+		if doc, created, err := s.saveUpload(r.Context(), u, name, bytes.NewReader(pdf), ocrRequest, said); err != nil {
 			log.Printf("upload %s: %v", name, err)
 			res.Error = describe(i18n.Lang(r), err)
 		} else {
@@ -523,7 +540,7 @@ func describe(lang string, err error) string {
 	return i18n.T(lang, "internal error")
 }
 
-func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src io.Reader, ocrRequest string) (store.Document, bool, error) {
+func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src io.Reader, ocrRequest string, said store.Document) (store.Document, bool, error) {
 	ext := strings.ToLower(filepath.Ext(name))
 	mime, ok := allowedTypes[ext]
 	if !ok {
@@ -560,6 +577,7 @@ func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src 
 	}
 	return s.Store.InsertDocument(ctx, store.Document{
 		OrgID: u.OrgID, Filename: name, Mime: mime, SizeBytes: n, SHA256: sum, StorageKey: key, OCRRequest: ocrRequest,
+		DocType: said.DocType, Category: said.Category, UserNote: said.UserNote,
 	})
 }
 
@@ -643,6 +661,31 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// correctDocument lets the user say what a document is: its type, business area, title,
+// subject, and a note in their own words. Those values then survive any re-read.
+func (s *Server) correctDocument(w http.ResponseWriter, r *http.Request) {
+	var c store.Correction
+	if !readJSON(w, r, &c) {
+		return
+	}
+	bad := func(v *string, allowed []string) bool { return v != nil && !slices.Contains(allowed, *v) }
+	tooLong := func(v *string, max int) bool { return v != nil && len([]rune(*v)) > max }
+	if bad(c.DocType, store.DocTypes) || bad(c.Category, store.Categories) ||
+		tooLong(c.Title, 200) || tooLong(c.Subject, 200) || tooLong(c.Note, maxNoteChars) {
+		writeErr(w, r, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if c.Title != nil && strings.TrimSpace(*c.Title) == "" {
+		c.Title = nil // an empty title would leave the document unnamed
+	}
+	doc, err := s.Store.Correct(r.Context(), userFrom(r).OrgID, idParam(r), c)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"document": doc})
 }
 
 func (s *Server) reprocess(w http.ResponseWriter, r *http.Request) {

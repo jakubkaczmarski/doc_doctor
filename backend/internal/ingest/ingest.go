@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,12 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 	company, err := p.Store.OrgContext(ctx, doc.OrgID)
 	if err != nil {
 		return fmt.Errorf("load company info: %w", err)
+	}
+	if examples, err := p.Store.FilingExamples(ctx, doc.OrgID, 25); err == nil && len(examples) > 0 {
+		company += "\n\nHow the owner filed earlier documents by hand:\n" + strings.Join(examples, "\n")
+	}
+	if doc.UserNote != "" {
+		company += "\n\nThe owner said this about the document being filed now: " + strconv.Quote(doc.UserNote)
 	}
 	analysis, err := p.Claude.Analyze(ctx, company, doc.Filename, full.String())
 	if err != nil {

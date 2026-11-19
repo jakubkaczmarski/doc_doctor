@@ -76,7 +76,7 @@ func tool(name, desc string, props map[string]any, required ...string) anthropic
 func strDesc(d string) map[string]any { return map[string]any{"type": "string", "description": d} }
 func intDesc(d string) map[string]any { return map[string]any{"type": "integer", "description": d} }
 
-var docTypeProp = map[string]any{"type": "string", "enum": []string{"invoice", "receipt", "contract", "letter", "form", "report", "other", "unknown"}}
+var docTypeProp = map[string]any{"type": "string", "enum": append(append([]string{}, store.DocTypes...), "unknown")}
 
 var filterProps = map[string]any{
 	"text":         strDesc("Substring matched against title, file name, counterparty, summary and tags."),
@@ -217,6 +217,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 			rows = append(rows, map[string]any{
 				"id": d.ID, "doc_type": d.DocType, "category": d.Category, "subject": d.Subject, "title": d.Title, "doc_date": d.DocDate, "counterparty": d.Counterparty,
 				"total_amount": d.TotalAmount, "currency": d.Currency, "tags": d.Tags, "pages": d.PageCount, "summary": d.Summary,
+				"owner_note": d.UserNote,
 			})
 		}
 		return toJSON(map[string]any{"count": len(rows), "documents": rows}), i18n.T(r.lang, "Listing documents"), nil

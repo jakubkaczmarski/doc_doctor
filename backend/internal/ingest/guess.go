@@ -22,6 +22,11 @@ var typeRules = []rule{
 	{"contract", []string{"umowa", "contract", "agreement", "vertrag", "zwanym dalej", "zwana dalej", "aneks", "hereinafter", "strony ustalaja", "wypowiedzeni"}},
 	{"letter", []string{"szanowni panstwo", "szanowny panie", "szanowna pani", "dear ", "sehr geehrte", "z powazaniem", "kind regards", "sincerely", "wezwanie", "w odpowiedzi na"}},
 	{"form", []string{"formularz", "wniosek", "deklaracja", "oswiadczenie", "application form", "antrag", "wypelnic", "pit-", "cit-", "vat-7"}},
+	{"statement", []string{"wyciag bankowy", "wyciag z rachunku", "bank statement", "account statement", "kontoauszug", "saldo poczatkowe", "saldo koncowe", "historia rachunku"}},
+	{"order", []string{"zamowienie", "oferta", "purchase order", "order confirmation", "quotation", "quote", "bestellung", "angebot", "potwierdzenie zamowienia"}},
+	{"delivery_note", []string{"dokument wz", "wydanie zewnetrzne", "list przewozowy", "delivery note", "lieferschein", "dowod dostawy", "przyjecie zewnetrzne"}},
+	{"payslip", []string{"lista plac", "pasek wynagrodzen", "payslip", "wynagrodzenie netto", "wynagrodzenie brutto", "gehaltsabrechnung", "do wyplaty"}},
+	{"certificate", []string{"zaswiadczenie", "certyfikat", "certificate", "swiadectwo", "licencja", "zezwolenie", "odpis", "bescheinigung", "polisa nr"}},
 	{"report", []string{"raport", "sprawozdanie", "report", "zestawienie", "bilans", "protokol", "bericht", "rachunek zyskow"}},
 }
 
@@ -79,5 +84,6 @@ func guess(text string) *store.Analysis {
 			category = "purchases"
 		}
 	}
-	return &store.Analysis{DocType: docType, Category: category}
+	// Keyword matches are never certain, so the owner is asked to confirm.
+	return &store.Analysis{DocType: docType, Category: category, TypeConfidence: "low"}
 }

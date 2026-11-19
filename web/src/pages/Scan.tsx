@@ -5,7 +5,8 @@ import { Camera, Images, Loader2, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api } from '@/lib/api'
+import { SayWhatItIs } from '@/components/WhatIsThis'
+import { api, type Said } from '@/lib/api'
 import { t, tn } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +44,7 @@ export default function ScanPage() {
   const [shots, setShots] = useState<Shot[]>([])
   const [separate, setSeparate] = useState(false)
   const [name, setName] = useState('')
+  const [said, setSaid] = useState<Said>({})
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -81,7 +83,8 @@ export default function ScanPage() {
     try {
       const files = shots.map((s) => s.file)
       const asOne = !separate || files.length === 1
-      const { results } = asOne && files.length > 1 ? await api.uploadScan(files, name.trim()) : await api.upload(files)
+      const { results } =
+        asOne && files.length > 1 ? await api.uploadScan(files, name.trim(), said) : await api.upload(files, said)
       const failed = results.filter((r) => r.error)
       failed.forEach((r) => toast.error(`${r.filename}: ${r.error}`))
       if (failed.length === results.length) return
@@ -91,6 +94,7 @@ export default function ScanPage() {
       shots.forEach((s) => URL.revokeObjectURL(s.url))
       setShots([])
       setName('')
+      setSaid({})
       navigate(saved.length === 1 ? `/documents/${saved[0].document!.id}` : '/documents')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('scan.saveErr'))
@@ -255,6 +259,21 @@ export default function ScanPage() {
           />
         </div>
       )}
+
+      <details className="mt-6 border-t pt-4">
+        <summary className="cursor-pointer text-sm font-medium text-primary underline-offset-4 hover:underline">
+          {t('scan.sayTitle')}
+        </summary>
+        <p className="mt-1 mb-4 text-sm text-muted-foreground">{t('scan.sayHint')}</p>
+        <SayWhatItIs
+          autoOption
+          idPrefix="scan"
+          type={said.type ?? ''}
+          category={said.category ?? ''}
+          note={said.note ?? ''}
+          onChange={(n) => setSaid((s) => ({ ...s, ...n }))}
+        />
+      </details>
 
       <div className="sticky bottom-0 mt-auto bg-background pt-6 pb-4">
         <Button size="lg" className="h-12 w-full text-base" onClick={() => void save()} disabled={saving || adding}>
