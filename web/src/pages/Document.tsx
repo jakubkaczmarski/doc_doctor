@@ -5,7 +5,8 @@ import { ArrowLeft, Download, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PageText } from '@/components/PageText'
 import { StatusMark } from '@/components/StatusMark'
-import { api, categoryLabel, readability, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
+import { api, categoryLabel, noteText, readability, formatAmount, formatDate, typeLabel, type Doc, type Page } from '@/lib/api'
+import { t, tn } from '@/lib/i18n'
 import { useSession } from '@/lib/session'
 
 export default function DocumentPage() {
@@ -51,29 +52,29 @@ export default function DocumentPage() {
     const careful = capabilities?.claude && doc?.ocr_engine !== 'claude-vision' && doc?.status !== 'failed'
     try {
       await api.reprocess(id, careful ? 'claude' : 'auto')
-      toast.success(careful ? 'Reading it again, more carefully.' : 'Reading it again.')
+      toast.success(careful ? t('doc.readingCareful') : t('doc.readingAgain'))
       await load()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not start a new read.')
+      toast.error(err instanceof Error ? err.message : t('doc.readErr'))
     }
   }
 
   async function remove() {
     try {
       await api.deleteDocument(id)
-      toast.success('Document deleted.')
+      toast.success(t('doc.deleted'))
       navigate('/documents')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not delete the document.')
+      toast.error(err instanceof Error ? err.message : t('doc.deleteErr'))
     }
   }
 
   if (missing) {
     return (
       <div className="px-10 py-16">
-        <p className="font-medium">This document does not exist or was deleted.</p>
+        <p className="font-medium">{t('doc.missing')}</p>
         <Link to="/documents" className="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline">
-          Back to documents
+          {t('doc.back')}
         </Link>
       </div>
     )
@@ -83,19 +84,19 @@ export default function DocumentPage() {
   const fileUrl = `/api/documents/${doc.id}/file`
   const quality = doc.ocr_engine === 'pdf-text' ? null : readability(doc.ocr_confidence)
   const facts: [string, string][] = [
-    ['Type', typeLabel(doc.doc_type)],
-    ['Relates to', categoryLabel(doc.category)],
-    ['About', doc.subject],
-    ['Dated', formatDate(doc.doc_date)],
-    ['Counterparty', doc.counterparty],
-    ['Amount', formatAmount(doc.total_amount, doc.currency)],
+    [t('doc.factType'), typeLabel(doc.doc_type)],
+    [t('doc.factRelates'), categoryLabel(doc.category)],
+    [t('doc.factAbout'), doc.subject],
+    [t('doc.factDated'), formatDate(doc.doc_date)],
+    [t('doc.factCounterparty'), doc.counterparty],
+    [t('doc.factAmount'), formatAmount(doc.total_amount, doc.currency)],
     ...doc.fields.map((f) => [f.name, f.value] as [string, string]),
   ].filter(([, v]) => v) as [string, string][]
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-card px-5 py-3 md:px-8">
-        <Link to="/documents" aria-label="Back to documents" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted">
+        <Link to="/documents" aria-label={t('doc.back')} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted">
           <ArrowLeft className="size-4" />
         </Link>
         <div className="mr-auto min-w-0">
@@ -103,34 +104,34 @@ export default function DocumentPage() {
           <div className="flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
             <StatusMark doc={doc} />
             <span>{doc.filename}</span>
-            {doc.page_count > 0 && <span>{doc.page_count === 1 ? '1 page' : `${doc.page_count} pages`}</span>}
+            {doc.page_count > 0 && <span>{tn('pages', doc.page_count)}</span>}
           </div>
         </div>
         {!pending && (
           <>
             <Button variant="outline" onClick={() => void reread()}>
-              <RotateCw aria-hidden /> Read again
+              <RotateCw aria-hidden /> {t('doc.readAgain')}
             </Button>
             <a
               href={fileUrl}
               download={doc.filename}
               className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium hover:bg-muted"
             >
-              <Download className="size-4" aria-hidden /> Download
+              <Download className="size-4" aria-hidden /> {t('doc.download')}
             </a>
             {confirmDelete ? (
               <span className="flex items-center gap-1.5 text-sm">
-                Delete for good?
+                {t('doc.deleteAsk')}
                 <Button variant="destructive" onClick={() => void remove()}>
-                  Delete
+                  {t('doc.delete')}
                 </Button>
                 <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                  Keep
+                  {t('doc.keep')}
                 </Button>
               </span>
             ) : (
               <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
-                <Trash2 aria-hidden /> Delete
+                <Trash2 aria-hidden /> {t('doc.delete')}
               </Button>
             )}
           </>
@@ -140,22 +141,21 @@ export default function DocumentPage() {
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
         {doc.status === 'failed' && (
           <div role="alert" className="mb-6 max-w-3xl border-l-2 border-stamp bg-card px-4 py-3 text-sm">
-            <p className="font-medium text-stamp">We could not read this file</p>
+            <p className="font-medium text-stamp">{t('doc.failTitle')}</p>
             <p className="mt-1">
-              This sometimes happens with damaged files or very dark photos. Try again, and if it still fails, scan the
-              document once more.
+              {t('doc.failBody')}
             </p>
             <Button className="mt-3" onClick={() => void reread()}>
-              <RotateCw aria-hidden /> Try again
+              <RotateCw aria-hidden /> {t('doc.tryAgain')}
             </Button>
             <details className="mt-3 text-muted-foreground">
-              <summary className="cursor-pointer underline-offset-4 hover:underline">Technical details</summary>
+              <summary className="cursor-pointer underline-offset-4 hover:underline">{t('doc.tech')}</summary>
               <p className="mt-1 [overflow-wrap:anywhere]">{doc.error}</p>
             </details>
           </div>
         )}
         {doc.notice && (
-          <p className="mb-6 max-w-3xl border-l-2 border-input bg-card px-4 py-3 text-sm text-muted-foreground">{doc.notice}</p>
+          <p className="mb-6 max-w-3xl border-l-2 border-input bg-card px-4 py-3 text-sm text-muted-foreground">{noteText(doc.notice)}</p>
         )}
 
         {(doc.summary || facts.length > 0) && (
@@ -172,7 +172,7 @@ export default function DocumentPage() {
               </dl>
             )}
             {doc.tags.length > 0 && (
-              <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="Tags">
+              <ul className="mt-4 flex flex-wrap gap-1.5" aria-label={t('doc.tags')}>
                 {doc.tags.map((t) => (
                   <li key={t} className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-secondary-foreground">
                     {t}
@@ -186,7 +186,7 @@ export default function DocumentPage() {
         {pages.length > 0 && (
           <section>
             <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-              <h2 className="font-semibold">Each page: the picture and what we read from it</h2>
+              <h2 className="font-semibold">{t('doc.pagesTitle')}</h2>
               {quality && (
                 <p className={quality.poor ? 'text-sm font-medium text-stamp' : 'text-sm text-muted-foreground'}>
                   {quality.label}
@@ -200,9 +200,9 @@ export default function DocumentPage() {
                 className="mt-4 scroll-mt-4 border bg-card target:border-primary target:ring-2 target:ring-primary/20"
               >
                 <div className="flex justify-between border-b px-5 py-1.5 text-xs text-muted-foreground">
-                  <span>Page {p.page_no}</span>
+                  <span>{t('doc.page', { n: p.page_no })}</span>
                   {p.confidence != null && p.confidence < 0.85 && (
-                    <span className="text-stamp">Hard to read, check it against the picture</span>
+                    <span className="text-stamp">{t('doc.hardPage')}</span>
                   )}
                 </div>
                 <div className="grid lg:grid-cols-2">
@@ -211,11 +211,11 @@ export default function DocumentPage() {
                     target="_blank"
                     rel="noreferrer"
                     className="block border-b bg-muted p-4 lg:border-r lg:border-b-0"
-                    title="Open the picture at full size"
+                    title={t('doc.openPicture')}
                   >
                     <img
                       src={`/api/documents/${doc.id}/pages/${p.page_no}/image`}
-                      alt={`Scan of page ${p.page_no}`}
+                      alt={t('doc.pictureAlt', { n: p.page_no })}
                       loading="lazy"
                       className="mx-auto max-h-[80vh] w-auto max-w-full bg-white shadow-sm"
                     />
@@ -228,7 +228,7 @@ export default function DocumentPage() {
                     />
                   ) : (
                     <div className="ocr-text px-5 py-4">
-                      <em className="text-muted-foreground">No text on this page.</em>
+                      <em className="text-muted-foreground">{t('doc.noText')}</em>
                     </div>
                   )}
                 </div>

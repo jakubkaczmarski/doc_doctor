@@ -67,6 +67,15 @@ Claude, which also sees the company name and business info so it can tell a purc
 from a sale. Without a key, or if that call fails, type and area are guessed from
 keywords (Polish, English, German) and the document says so.
 
+## Languages
+
+The interface is available in English and Polish. It follows the browser's language on
+first visit and can be switched with the Polski / English link (sidebar, phone header and
+sign-in screen); the choice is remembered on that device. Interface text lives in
+`web/src/lib/i18n.tsx`, and the server's own messages (errors, progress lines while
+answering) in `backend/internal/i18n`. The assistant replies in the language of the
+question, whatever the interface is set to.
+
 ## OCR modes
 
 `OCR_MODE` in `.env`, and "Re-read with Claude vision" per document in the UI.

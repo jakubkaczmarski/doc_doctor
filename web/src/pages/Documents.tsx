@@ -8,7 +8,19 @@ import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Marked } from '@/components/Marked'
 import { StatusMark } from '@/components/StatusMark'
-import { api, categories, categoryLabel, docTypes, formatAmount, formatDate, typeLabel, type Doc, type Hit } from '@/lib/api'
+import {
+  api,
+  categoryKeys,
+  categoryLabel,
+  docTypes,
+  formatAmount,
+  formatDate,
+  typeLabel,
+  typesLabel,
+  type Doc,
+  type Hit,
+} from '@/lib/api'
+import { t, tn } from '@/lib/i18n'
 import { useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
@@ -38,7 +50,7 @@ export default function DocumentsPage() {
       setDocs(list.documents)
       setHits(found.hits)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not load documents.')
+      toast.error(err instanceof Error ? err.message : t('docs.loadErr'))
     }
   }, [query, type, category])
 
@@ -63,12 +75,12 @@ export default function DocumentsPage() {
       const { results } = await api.upload(files)
       const added = results.filter((r) => r.document && !r.duplicate).length
       const dupes = results.filter((r) => r.duplicate).length
-      if (added) toast.success(`${added} ${added === 1 ? 'file' : 'files'} added. Reading ${added === 1 ? 'it' : 'them'} now.`)
-      if (dupes) toast.info(`${dupes} ${dupes === 1 ? 'file was' : 'files were'} already in the archive.`)
+      if (added) toast.success(tn('docs.added', added))
+      if (dupes) toast.info(tn('docs.dupes', dupes))
       results.filter((r) => r.error).forEach((r) => toast.error(`${r.filename}: ${r.error}`))
       await load()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed.')
+      toast.error(err instanceof Error ? err.message : t('docs.uploadErr'))
     } finally {
       setUploading(0)
     }
@@ -92,7 +104,7 @@ export default function DocumentsPage() {
       const link = await api.phoneLink()
       if (link.urls[0]) setPhoneLink({ url: link.urls[0], minutes: link.minutes })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not create a phone code.')
+      toast.error(err instanceof Error ? err.message : t('phone.err'))
     }
   }
   const empty = docs !== null && docs.length === 0 && hits.length === 0
@@ -118,7 +130,7 @@ export default function DocumentsPage() {
         multiple
         accept={ACCEPT}
         className="sr-only"
-        aria-label="Upload documents"
+        aria-label={t('docs.uploadAria')}
         onChange={(e) => {
           void upload(Array.from(e.target.files ?? []))
           e.target.value = ''
@@ -126,70 +138,70 @@ export default function DocumentsPage() {
       />
 
       <header className="flex flex-wrap items-center gap-3">
-        <h1 className="mr-auto text-2xl font-semibold tracking-tight">Documents</h1>
+        <h1 className="mr-auto text-2xl font-semibold tracking-tight">{t('docs.title')}</h1>
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your documents"
-            aria-label="Search documents"
+            placeholder={t('docs.search')}
+            aria-label={t('docs.searchAria')}
             className="bg-card pl-8"
           />
         </div>
         <Button variant="outline" className="hidden md:inline-flex" onClick={() => void openPhonePanel()}>
-          <Smartphone aria-hidden /> Scan with phone
+          <Smartphone aria-hidden /> {t('docs.scanPhone')}
         </Button>
         <Button onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
           {uploading > 0 ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
-          {uploading > 0 ? `Uploading ${uploading}` : 'Upload files'}
+          {uploading > 0 ? t('docs.uploading', { n: uploading }) : t('docs.upload')}
         </Button>
       </header>
 
-      <div className="mt-5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter documents">
-        {['', ...docTypes].map((t) => (
+      <div className="mt-5 flex flex-wrap items-center gap-1.5" role="group" aria-label={t('docs.filterAria')}>
+        {['', ...docTypes].map((type_) => (
           <button
-            key={t || 'all'}
-            onClick={() => setType(t)}
-            aria-pressed={type === t}
+            key={type_ || 'all'}
+            onClick={() => setType(type_)}
+            aria-pressed={type === type_}
             className={cn(
               'rounded-full border px-3 py-1 text-sm transition-colors',
-              type === t
+              type === type_
                 ? 'border-ink bg-ink text-white'
                 : 'border-border bg-card text-muted-foreground hover:text-foreground',
             )}
           >
-            {t ? typeLabel(t) + 's' : 'All'}
+            {type_ ? typesLabel(type_) : t('docs.all')}
           </button>
         ))}
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          aria-label="Filter by business area"
+          aria-label={t('docs.areaAria')}
           className={cn(
             'h-[1.875rem] rounded-full border bg-card px-3 text-sm',
             category ? 'border-ink text-foreground' : 'text-muted-foreground',
           )}
         >
-          <option value="">Any area</option>
-          {Object.entries(categories).map(([value, label]) => (
+          <option value="">{t('docs.anyArea')}</option>
+          {categoryKeys.map((value) => (
             <option key={value} value={value}>
-              {label}
+              {categoryLabel(value)}
             </option>
           ))}
         </select>
       </div>
 
       {hits.length > 0 && (
-        <section className="mt-8" aria-label="Matches in scanned text">
-          <h2 className="text-sm font-semibold">Found inside documents</h2>
+        <section className="mt-8" aria-label={t('docs.foundAria')}>
+          <h2 className="text-sm font-semibold">{t('docs.foundInside')}</h2>
           <ul className="mt-2 divide-y border-y bg-card">
             {hits.map((h) => (
               <li key={`${h.doc_id}-${h.page}`}>
                 <Link to={`/documents/${h.doc_id}#p${h.page}`} className="block px-4 py-3 hover:bg-accent/50">
                   <div className="flex items-baseline gap-2 text-sm">
                     <span className="truncate font-medium">{h.title}</span>
-                    <span className="shrink-0 text-muted-foreground">page {h.page}</span>
+                    <span className="shrink-0 text-muted-foreground">{t('docs.page', { n: h.page })}</span>
                   </div>
                   <p className="mt-1 line-clamp-2 font-serif text-sm leading-relaxed text-muted-foreground">
                     <Marked text={h.snippet} />
@@ -205,46 +217,38 @@ export default function DocumentsPage() {
         <div className="mt-10 rounded-lg border border-dashed bg-card px-6 py-16 text-center">
           {filtering ? (
             <>
-              <p className="font-medium">Nothing matches that search.</p>
-              <p className="mt-1 text-sm text-muted-foreground">Try a shorter word, or clear the filters.</p>
+              <p className="font-medium">{t('docs.nothing')}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{t('docs.nothingHint')}</p>
             </>
           ) : (
             <>
-              <p className="text-lg font-medium">Add your first document</p>
+              <p className="text-lg font-medium">{t('docs.firstTitle')}</p>
               <ol className="mx-auto mt-4 mb-2 grid max-w-2xl gap-4 text-left text-sm sm:grid-cols-3">
-                <li>
-                  <span className="font-medium">1. Scan or upload.</span>{' '}
-                  <span className="text-muted-foreground">Photograph a paper with your phone, or add files from this device.</span>
-                </li>
-                <li>
-                  <span className="font-medium">2. We read and file it.</span>{' '}
-                  <span className="text-muted-foreground">Each document is sorted by type and what it relates to.</span>
-                </li>
-                <li>
-                  <span className="font-medium">3. Ask a question.</span>{' '}
-                  <span className="text-muted-foreground">Answers show the page they came from.</span>
-                </li>
+                {['docs.step1', 'docs.step2', 'docs.step3'].map((k) => (
+                  <li key={k}>
+                    <span className="font-medium">{t(k)}</span>{' '}
+                    <span className="text-muted-foreground">{t(k + 'd')}</span>
+                  </li>
+                ))}
               </ol>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                <span className="hidden md:inline">
-                  You can also drag files onto this page. PDFs and photos work, up to 50 MB each.
-                </span>
+                <span className="hidden md:inline">{t('docs.dragHint')}</span>
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 <Link
                   to="/scan"
                   className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-sm font-medium text-primary-foreground md:hidden"
                 >
-                  Scan a document
+                  {t('docs.scanDoc')}
                 </Link>
                 <Button variant="outline" className="md:hidden" onClick={() => fileInput.current?.click()}>
-                  <Upload aria-hidden /> Upload files
+                  <Upload aria-hidden /> {t('docs.upload')}
                 </Button>
                 <Button className="hidden md:inline-flex" onClick={() => fileInput.current?.click()}>
-                  <Upload aria-hidden /> Upload files
+                  <Upload aria-hidden /> {t('docs.upload')}
                 </Button>
                 <Button variant="outline" className="hidden md:inline-flex" onClick={() => void openPhonePanel()}>
-                  <Smartphone aria-hidden /> Scan with phone
+                  <Smartphone aria-hidden /> {t('docs.scanPhone')}
                 </Button>
               </div>
             </>
@@ -253,8 +257,8 @@ export default function DocumentsPage() {
       ) : (
         docs &&
         docs.length > 0 && (
-          <section className="mt-8" aria-label="Document list">
-            {hits.length > 0 && <h2 className="mb-2 text-sm font-semibold">Matching documents</h2>}
+          <section className="mt-8" aria-label={t('docs.listAria')}>
+            {hits.length > 0 && <h2 className="mb-2 text-sm font-semibold">{t('docs.matching')}</h2>}
             {/* Phone: stacked rows */}
             <ul className="divide-y border-y bg-card md:hidden">
               {docs.map((d) => (
@@ -287,12 +291,12 @@ export default function DocumentsPage() {
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
                   <tr className="border-b border-ink text-left text-xs font-medium text-muted-foreground">
-                    <th className="px-4 py-2 font-medium">Document</th>
-                    <th className="px-3 py-2 font-medium">Type</th>
-                    <th className="px-3 py-2 font-medium">Relates to</th>
-                    <th className="px-3 py-2 font-medium">Dated</th>
-                    <th className="px-3 py-2 text-right font-medium">Amount</th>
-                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 font-medium">{t('docs.colDocument')}</th>
+                    <th className="px-3 py-2 font-medium">{t('docs.colType')}</th>
+                    <th className="px-3 py-2 font-medium">{t('docs.colRelates')}</th>
+                    <th className="px-3 py-2 font-medium">{t('docs.colDated')}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t('docs.colAmount')}</th>
+                    <th className="px-4 py-2 font-medium">{t('docs.colStatus')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -303,7 +307,7 @@ export default function DocumentsPage() {
                           {d.title || d.filename}
                         </Link>
                         <div className="truncate text-muted-foreground">
-                          {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : d.page_count === 1 ? '1 page' : d.page_count ? `${d.page_count} pages` : '')}
+                          {d.subject || d.counterparty || (d.title !== d.filename ? d.filename : d.page_count ? tn('pages', d.page_count) : '')}
                         </div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{typeLabel(d.doc_type)}</td>
@@ -329,37 +333,32 @@ export default function DocumentsPage() {
       <Sheet open={phoneOpen} onOpenChange={setPhoneOpen}>
         <SheetContent className="w-full gap-0 sm:max-w-md data-[side=right]:sm:max-w-md">
           <SheetHeader className="border-b">
-            <SheetTitle>Scan with your phone</SheetTitle>
-            <SheetDescription>Take photos of your papers and they appear in this list.</SheetDescription>
+            <SheetTitle>{t('phone.title')}</SheetTitle>
+            <SheetDescription>{t('phone.desc')}</SheetDescription>
           </SheetHeader>
           <div className="p-5 leading-relaxed">
             {!phoneAddress ? (
-              <p>
-                This computer is not on a network right now. Connect it to Wi-Fi, reload this page, and try again.
-              </p>
+              <p>{t('phone.noNetwork')}</p>
             ) : !phoneLink ? (
-              <Loader2 className="size-5 animate-spin text-muted-foreground" aria-label="Creating a code" />
+              <Loader2 className="size-5 animate-spin text-muted-foreground" aria-label={t('phone.creating')} />
             ) : (
               <>
                 <div className="mx-auto w-fit border bg-white p-4">
                   <QRCodeSVG value={phoneLink.url} size={224} fgColor="#16233b" />
                 </div>
                 <ol className="mt-6 list-decimal space-y-2 pl-5">
-                  <li>Make sure your phone is on the same Wi-Fi as this computer.</li>
-                  <li>Open the phone&apos;s camera and point it at this code.</li>
-                  <li>Tap the link that appears. Doc Doctor opens, already signed in.</li>
-                  <li>Tap Take photo and photograph each page.</li>
+                  {['phone.s1', 'phone.s2', 'phone.s3', 'phone.s4'].map((k) => (
+                    <li key={k}>{t(k)}</li>
+                  ))}
                 </ol>
                 <p className="mt-6 text-sm text-muted-foreground">
-                  The code works once, for {phoneLink.minutes} minutes. Close and reopen this panel for a new one. It
-                  only works on your own Wi-Fi.
+                  {t('phone.valid', { n: phoneLink.minutes })}
                 </p>
                 <details className="mt-3 text-sm text-muted-foreground">
-                  <summary className="cursor-pointer underline-offset-4 hover:underline">The code does not open anything</summary>
+                  <summary className="cursor-pointer underline-offset-4 hover:underline">{t('phone.trouble')}</summary>
                   <p className="mt-1">
-                    On the phone, open the web browser and go to{' '}
-                    <span className="font-medium break-all text-foreground">{phoneAddress}</span>, then sign in with your
-                    email and password. If the page does not load, the computer&apos;s firewall may be blocking it.
+                    {t('phone.troubleA')}{' '}
+                    <span className="font-medium break-all text-foreground">{phoneAddress}</span>, {t('phone.troubleB')}
                   </p>
                 </details>
               </>
@@ -372,7 +371,7 @@ export default function DocumentsPage() {
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-primary/10 backdrop-blur-[2px]">
           <div className="rounded-lg border-2 border-dashed border-primary bg-card px-10 py-8 text-center shadow-lg">
             <Upload className="mx-auto size-6 text-primary" aria-hidden />
-            <p className="mt-2 font-medium">Drop to add to the archive</p>
+            <p className="mt-2 font-medium">{t('docs.drop')}</p>
           </div>
         </div>
       )}

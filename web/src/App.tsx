@@ -1,7 +1,8 @@
 import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
 import { Building2, Camera, FileStack, LogOut, MessagesSquare } from 'lucide-react'
-import { CLAUDE_SETUP, READER_SETUP, SetupNote } from '@/components/SetupNote'
+import { SetupNote } from '@/components/SetupNote'
 import { Toaster } from '@/components/ui/sonner'
+import { LangProvider, LangSwitch, t } from '@/lib/i18n'
 import { SessionProvider, useSession } from '@/lib/session'
 import { cn } from '@/lib/utils'
 import AuthPage from '@/pages/Auth'
@@ -11,11 +12,12 @@ import AskPage from '@/pages/Ask'
 import BusinessPage from '@/pages/Business'
 import ScanPage from '@/pages/Scan'
 
+// Labels are translation keys, resolved when the shell renders.
 const NAV = [
-  { to: '/documents', label: 'Documents', short: 'Documents', icon: FileStack },
-  { to: '/scan', label: 'Scan', short: 'Scan', icon: Camera },
-  { to: '/ask', label: 'Ask', short: 'Ask', icon: MessagesSquare },
-  { to: '/business', label: 'Business info', short: 'Info', icon: Building2 },
+  { to: '/documents', label: 'nav.documents', short: 'nav.documents', icon: FileStack },
+  { to: '/scan', label: 'nav.scan', short: 'nav.scan', icon: Camera },
+  { to: '/ask', label: 'nav.ask', short: 'nav.ask', icon: MessagesSquare },
+  { to: '/business', label: 'nav.business', short: 'nav.businessShort', icon: Building2 },
 ]
 
 function Shell() {
@@ -44,10 +46,10 @@ function Shell() {
             {user.org_name}
           </div>
         </div>
-        <nav className="flex flex-col gap-1" aria-label="Main">
+        <nav className="flex flex-col gap-1" aria-label={t('nav.main')}>
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} className={link}>
-              <Icon className="size-4" aria-hidden /> {label}
+              <Icon className="size-4" aria-hidden /> {t(label)}
             </NavLink>
           ))}
         </nav>
@@ -55,13 +57,13 @@ function Shell() {
           {capabilities && (!capabilities.claude || !capabilities.local_ocr) && (
             <div className="mb-3 space-y-2 rounded-md border border-dashed px-3 py-2">
               {!capabilities.local_ocr && (
-                <SetupNote details={READER_SETUP} className="text-xs">
-                  Reading new documents is paused.
+                <SetupNote details="reader" className="text-xs">
+                  {t('shell.readerPaused')}
                 </SetupNote>
               )}
               {!capabilities.claude && (
-                <SetupNote details={CLAUDE_SETUP} className="text-xs">
-                  Questions and summaries are not switched on yet. Search works.
+                <SetupNote details="claude" className="text-xs">
+                  {t('shell.claudeOff')}
                 </SetupNote>
               )}
             </div>
@@ -70,24 +72,28 @@ function Shell() {
             onClick={() => void signOut()}
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <LogOut className="size-4" aria-hidden /> Sign out
+            <LogOut className="size-4" aria-hidden /> {t('nav.signOut')}
           </button>
+          <LangSwitch className="mt-1 block w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground" />
         </div>
       </aside>
 
       {/* Phone: slim header, content, bottom tab bar */}
-      <header className="flex shrink-0 items-center justify-between border-b bg-card px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
-        <div className="min-w-0">
-          <span className="font-semibold tracking-tight">Doc Doctor</span>
-          <span className="ml-2 truncate text-xs text-muted-foreground">{user.org_name}</span>
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="shrink-0 font-semibold tracking-tight whitespace-nowrap">Doc Doctor</span>
+          <span className="truncate text-xs text-muted-foreground">{user.org_name}</span>
         </div>
-        <button
-          onClick={() => void signOut()}
-          aria-label="Sign out"
-          className="rounded-md p-2 text-muted-foreground hover:bg-muted"
-        >
-          <LogOut className="size-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <LangSwitch className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted" />
+          <button
+            onClick={() => void signOut()}
+            aria-label={t('nav.signOut')}
+            className="rounded-md p-2 text-muted-foreground hover:bg-muted"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
       </header>
 
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -96,12 +102,12 @@ function Shell() {
 
       <nav
         className="flex shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
-        aria-label="Main"
+        aria-label={t('nav.main')}
       >
         {NAV.map(({ to, short, icon: Icon }) => (
           <NavLink key={to} to={to} className={tab}>
             <Icon className="size-5" aria-hidden />
-            {short}
+            {t(short)}
           </NavLink>
         ))}
       </nav>
@@ -111,8 +117,9 @@ function Shell() {
 
 export default function App() {
   return (
-    <SessionProvider>
-      <BrowserRouter>
+    <LangProvider>
+      <SessionProvider>
+        <BrowserRouter>
         <Routes>
           <Route path="/sign-in" element={<AuthPage mode="sign-in" />} />
           <Route path="/sign-up" element={<AuthPage mode="sign-up" />} />
@@ -127,7 +134,8 @@ export default function App() {
           <Route path="*" element={<Navigate to="/documents" replace />} />
         </Routes>
       </BrowserRouter>
-      <Toaster position="bottom-right" />
-    </SessionProvider>
+        <Toaster position="bottom-right" />
+      </SessionProvider>
+    </LangProvider>
   )
 }

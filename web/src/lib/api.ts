@@ -78,6 +78,8 @@ export type Conversation = { id: number; title: string; updated_at: string }
 
 export type UploadResult = { filename: string; document?: Doc; duplicate?: boolean; error?: string }
 
+import { lang, locale, t } from './i18n'
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -89,12 +91,16 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
-    res = await fetch('/api' + path, { credentials: 'same-origin', ...init })
+    res = await fetch('/api' + path, {
+      credentials: 'same-origin',
+      ...init,
+      headers: { ...init?.headers, 'X-Lang': lang() }, // server messages come back in this language
+    })
   } catch {
-    throw new ApiError(0, 'Cannot reach the server. Check that the API is running.')
+    throw new ApiError(0, t('api.unreachable'))
   }
   if (!res.ok) {
-    let message = `Request failed (${res.status})`
+    let message = t('api.failed', { status: res.status })
     try {
       message = (await res.json()).error ?? message
     } catch {
@@ -107,7 +113,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const json = (body: unknown): RequestInit => ({
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', 'X-Lang': lang() },
   body: JSON.stringify(body),
 })
 
@@ -174,7 +180,7 @@ export async function streamChat(
     signal,
   })
   if (!res.ok || !res.body) {
-    let message = `Request failed (${res.status})`
+    let message = t('api.failed', { status: res.status })
     try {
       message = (await res.json()).error ?? message
     } catch {
@@ -202,60 +208,59 @@ export async function streamChat(
 
 export const docTypes = ['invoice', 'receipt', 'contract', 'letter', 'form', 'report', 'other'] as const
 
-export const categories: Record<string, string> = {
-  purchases: 'Purchases',
-  sales: 'Sales',
-  premises: 'Premises',
-  banking: 'Banking',
-  taxes: 'Taxes',
-  payroll_hr: 'Payroll and HR',
-  insurance: 'Insurance',
-  legal: 'Legal',
-  vehicles: 'Vehicles',
-  it_telecom: 'IT and telecom',
-  administration: 'Administration',
-  other: 'Other',
-}
+export const categoryKeys = [
+  'purchases',
+  'sales',
+  'premises',
+  'banking',
+  'taxes',
+  'payroll_hr',
+  'insurance',
+  'legal',
+  'vehicles',
+  'it_telecom',
+  'administration',
+  'other',
+] as const
 
 export function categoryLabel(c: string) {
-  return categories[c] ?? ''
+  return (categoryKeys as readonly string[]).includes(c) ? t(`cat.${c}`) : ''
 }
 
-export function typeLabel(t: string) {
-  return t === 'unknown' ? 'Unsorted' : t.charAt(0).toUpperCase() + t.slice(1)
+export function typeLabel(type: string) {
+  return t(`type.${type}`)
+}
+
+/** Plural label for the type filter ("Invoices"). */
+export function typesLabel(type: string) {
+  return t(`types.${type}`)
 }
 
 export function formatAmount(amount: number | null, currency: string) {
   if (amount == null) return ''
-  const n = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const n = amount.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return currency ? `${n} ${currency}` : n
 }
 
 export function formatDate(iso: string | null) {
   if (!iso) return ''
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  return d.toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 /** How clearly a scan could be read, in words rather than a percentage. */
 export function readability(confidence: number | null): { label: string; poor: boolean } | null {
   if (confidence == null) return null
-  if (confidence >= 0.95) return { label: 'Read clearly', poor: false }
-  if (confidence >= 0.85) return { label: 'Mostly clear', poor: false }
-  return { label: 'Hard to read', poor: true }
+  if (confidence >= 0.95) return { label: t('quality.clear'), poor: false }
+  if (confidence >= 0.85) return { label: t('quality.mostly'), poor: false }
+  return { label: t('quality.hard'), poor: true }
 }
 
-export function engineLabel(engine: string) {
-  switch (engine) {
-    case 'rapidocr':
-      return 'Local OCR'
-    case 'pdf-text':
-      return 'PDF text layer'
-    case 'mixed':
-      return 'Local OCR + PDF text'
-    case 'claude-vision':
-      return 'Claude vision'
-    default:
-      return engine
-  }
+const NOTE_CODES = ['no_text', 'no_summary', 'summary_failed', 'guessed', 'hard_to_read', 'read_twice']
+
+/** Turns the note codes stored on a document into sentences in the reader's language. */
+export function noteText(notice: string) {
+  const codes = notice.split(' ').filter(Boolean)
+  if (codes.length === 0 || !codes.every((c) => NOTE_CODES.includes(c))) return notice // older free-text note
+  return codes.map((c) => t(`note.${c}`)).join(' ')
 }

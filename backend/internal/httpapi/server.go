@@ -27,6 +27,7 @@ import (
 
 	"docdoctor/internal/chat"
 	"docdoctor/internal/config"
+	"docdoctor/internal/i18n"
 	"docdoctor/internal/ingest"
 	"docdoctor/internal/ocr"
 	"docdoctor/internal/store"
@@ -90,7 +91,7 @@ func (s *Server) Handler() http.Handler {
 // spa serves the built frontend and falls back to index.html for client-side routes.
 func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
-		writeErr(w, http.StatusNotFound, "not found")
+		writeErr(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	path := filepath.Join(s.Cfg.WebDir, filepath.Clean("/"+r.URL.Path))
@@ -117,23 +118,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+func writeErr(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": i18n.T(i18n.Lang(r), msg)})
 }
 
-func (s *Server) fail(w http.ResponseWriter, err error) {
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, store.ErrNotFound) {
-		writeErr(w, http.StatusNotFound, "not found")
+		writeErr(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	log.Printf("api error: %v", err)
-	writeErr(w, http.StatusInternalServerError, "internal error")
+	writeErr(w, r, http.StatusInternalServerError, "internal error")
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		writeErr(w, r, http.StatusBadRequest, "invalid JSON body")
 		return false
 	}
 	return true
@@ -171,12 +172,12 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieName)
 		if err != nil {
-			writeErr(w, http.StatusUnauthorized, "not signed in")
+			writeErr(w, r, http.StatusUnauthorized, "not signed in")
 			return
 		}
 		u, err := s.Store.UserBySession(r.Context(), hashToken(c.Value))
 		if err != nil {
-			writeErr(w, http.StatusUnauthorized, "not signed in")
+			writeErr(w, r, http.StatusUnauthorized, "not signed in")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u)))
@@ -195,33 +196,33 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	in.OrgName = strings.TrimSpace(in.OrgName)
 	if _, err := mail.ParseAddress(in.Email); err != nil {
-		writeErr(w, http.StatusBadRequest, "Enter a valid email address.")
+		writeErr(w, r, http.StatusBadRequest, "Enter a valid email address.")
 		return
 	}
 	if in.OrgName == "" {
-		writeErr(w, http.StatusBadRequest, "Enter your business name.")
+		writeErr(w, r, http.StatusBadRequest, "Enter your business name.")
 		return
 	}
 	if len(in.Password) < 8 || len(in.Password) > 72 {
-		writeErr(w, http.StatusBadRequest, "Password must be 8 to 72 characters.")
+		writeErr(w, r, http.StatusBadRequest, "Password must be 8 to 72 characters.")
 		return
 	}
 	if _, err := s.Store.UserByEmail(r.Context(), in.Email); err == nil {
-		writeErr(w, http.StatusConflict, "An account with this email already exists.")
+		writeErr(w, r, http.StatusConflict, "An account with this email already exists.")
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	u, err := s.Store.CreateOrgAndUser(r.Context(), in.OrgName, in.Email, string(hash))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	if err := s.startSession(w, r, u); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -237,11 +238,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.Store.UserByEmail(r.Context(), strings.ToLower(strings.TrimSpace(in.Email)))
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash()), []byte(in.Password)) != nil {
-		writeErr(w, http.StatusUnauthorized, "Wrong email or password.")
+		writeErr(w, r, http.StatusUnauthorized, "Wrong email or password.")
 		return
 	}
 	if err := s.startSession(w, r, u); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -262,12 +263,12 @@ const phoneLinkTTL = 10 * time.Minute
 func (s *Server) createPhoneLink(w http.ResponseWriter, r *http.Request) {
 	raw := make([]byte, 24)
 	if _, err := rand.Read(raw); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	token := hex.EncodeToString(raw)
 	if err := s.Store.CreateLoginLink(r.Context(), hashToken(token), userFrom(r).ID, phoneLinkTTL); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	urls := []string{}
@@ -285,7 +286,7 @@ func (s *Server) redeemPhoneLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.startSession(w, r, store.User{ID: userID}); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -313,7 +314,7 @@ func (s *Server) getOrg(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	profile, err := s.Store.OrgProfile(r.Context(), u.OrgID)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"name": u.OrgName, "profile": profile, "max_chars": maxProfileChars})
@@ -328,11 +329,11 @@ func (s *Server) putOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Profile = strings.TrimSpace(in.Profile)
 	if len([]rune(in.Profile)) > maxProfileChars {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Business info is limited to %d characters.", maxProfileChars))
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": i18n.T(i18n.Lang(r), "Business info is limited to %d characters.", maxProfileChars)})
 		return
 	}
 	if err := s.Store.SetOrgProfile(r.Context(), userFrom(r).OrgID, in.Profile); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"profile": in.Profile})
@@ -349,7 +350,7 @@ var allowedTypes = map[string]string{ // extension -> mime
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	st, err := s.Store.Stats(r.Context(), userFrom(r).OrgID)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -361,7 +362,7 @@ func (s *Server) listDocuments(w http.ResponseWriter, r *http.Request) {
 		Text: strings.TrimSpace(q.Get("q")), DocType: q.Get("type"), Category: q.Get("category"), Status: q.Get("status"),
 	})
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"documents": docs})
@@ -383,7 +384,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	mr, err := r.MultipartReader()
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "expected a multipart upload")
+		writeErr(w, r, http.StatusBadRequest, "expected a multipart upload")
 		return
 	}
 	ocrRequest := ""
@@ -396,7 +397,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "upload interrupted")
+			writeErr(w, r, http.StatusBadRequest, "upload interrupted")
 			return
 		}
 		if part.FormName() == "ocr" {
@@ -422,16 +423,16 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(part.FileName())
 		if combine {
 			if mime := allowedTypes[strings.ToLower(filepath.Ext(name))]; !strings.HasPrefix(mime, "image/") {
-				writeErr(w, http.StatusBadRequest, "Only photos can be joined into one scan.")
+				writeErr(w, r, http.StatusBadRequest, "Only photos can be joined into one scan.")
 				return
 			}
 			if len(scanPages) == maxScanPages {
-				writeErr(w, http.StatusBadRequest, fmt.Sprintf("A scan can have at most %d pages.", maxScanPages))
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": i18n.T(i18n.Lang(r), "A scan can have at most %d pages.", maxScanPages)})
 				return
 			}
 			data, err := io.ReadAll(io.LimitReader(part, maxUploadSize+1))
 			if err != nil || len(data) > maxUploadSize {
-				writeErr(w, http.StatusBadRequest, "A page photo is too large or the upload was interrupted.")
+				writeErr(w, r, http.StatusBadRequest, "A page photo is too large or the upload was interrupted.")
 				return
 			}
 			scanPages = append(scanPages, ocr.File{Name: name, Data: data})
@@ -441,7 +442,8 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		doc, created, err := s.saveUpload(r.Context(), u, name, part, ocrRequest)
 		switch {
 		case err != nil:
-			res.Error = err.Error()
+			log.Printf("upload %s: %v", name, err)
+			res.Error = describe(i18n.Lang(r), err)
 		default:
 			res.Document, res.Duplicate = &doc, !created
 		}
@@ -449,19 +451,20 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if combine {
 		if len(scanPages) == 0 {
-			writeErr(w, http.StatusBadRequest, "No pages were uploaded.")
+			writeErr(w, r, http.StatusBadRequest, "No pages were uploaded.")
 			return
 		}
 		pdf, err := s.Pipeline.Local.Combine(r.Context(), scanPages)
 		if err != nil {
 			log.Printf("combine scan: %v", err)
-			writeErr(w, http.StatusBadGateway, "Could not assemble the scan. Is the OCR worker running?")
+			writeErr(w, r, http.StatusBadGateway, "Could not assemble the scan. Is the OCR worker running?")
 			return
 		}
-		name := safeScanName(scanName)
+		name := safeScanName(i18n.Lang(r), scanName)
 		res := uploadResult{Filename: name}
 		if doc, created, err := s.saveUpload(r.Context(), u, name, bytes.NewReader(pdf), ocrRequest); err != nil {
-			res.Error = err.Error()
+			log.Printf("upload %s: %v", name, err)
+			res.Error = describe(i18n.Lang(r), err)
 		} else {
 			res.Document, res.Duplicate = &doc, !created
 		}
@@ -471,7 +474,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeScanName turns a user-supplied scan title into a PDF file name.
-func safeScanName(name string) string {
+func safeScanName(lang, name string) string {
 	name = strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || r < 32 {
 			return ' '
@@ -480,7 +483,7 @@ func safeScanName(name string) string {
 	}, name)
 	name = strings.TrimSpace(strings.TrimSuffix(name, ".pdf"))
 	if name == "" {
-		name = "Scan " + time.Now().Format("2006-01-02 15.04")
+		name = i18n.T(lang, "Scan %s", time.Now().Format("2006-01-02 15.04"))
 	}
 	return name + ".pdf"
 }
@@ -503,11 +506,28 @@ func (s *Server) lanURLs() []string {
 	return urls
 }
 
+// uploadError is a per-file problem the user can act on; Args fill the message's
+// placeholders after translation.
+type uploadError struct {
+	Msg  string
+	Args []any
+}
+
+func (e uploadError) Error() string { return fmt.Sprintf(e.Msg, e.Args...) }
+
+func describe(lang string, err error) string {
+	var ue uploadError
+	if errors.As(err, &ue) {
+		return i18n.T(lang, ue.Msg, ue.Args...)
+	}
+	return i18n.T(lang, "internal error")
+}
+
 func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src io.Reader, ocrRequest string) (store.Document, bool, error) {
 	ext := strings.ToLower(filepath.Ext(name))
 	mime, ok := allowedTypes[ext]
 	if !ok {
-		return store.Document{}, false, errors.New("Unsupported file type. Upload a PDF or an image (JPG, PNG, HEIC, TIFF, WebP).")
+		return store.Document{}, false, uploadError{Msg: "Unsupported file type. Upload a PDF or an image (JPG, PNG, HEIC, TIFF, WebP)."}
 	}
 	dir := filepath.Join(s.Cfg.DataDir, "uploads", strconv.FormatInt(u.OrgID, 10))
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -522,13 +542,13 @@ func (s *Server) saveUpload(ctx context.Context, u store.User, name string, src 
 	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(src, maxUploadSize+1))
 	tmp.Close()
 	if err != nil {
-		return store.Document{}, false, errors.New("Upload failed while saving the file.")
+		return store.Document{}, false, uploadError{Msg: "Upload failed while saving the file."}
 	}
 	if n > maxUploadSize {
-		return store.Document{}, false, fmt.Errorf("File is larger than %d MB.", maxUploadSize>>20)
+		return store.Document{}, false, uploadError{Msg: "File is larger than %d MB.", Args: []any{maxUploadSize >> 20}}
 	}
 	if n == 0 {
-		return store.Document{}, false, errors.New("File is empty.")
+		return store.Document{}, false, uploadError{Msg: "File is empty."}
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	key := fmt.Sprintf("%d/%s%s", u.OrgID, sum, ext)
@@ -547,12 +567,12 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	doc, err := s.Store.GetDocument(r.Context(), u.OrgID, idParam(r))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	pages, err := s.Store.GetPages(r.Context(), u.OrgID, doc.ID, 1, 0)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"document": doc, "pages": pages})
@@ -561,7 +581,7 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	doc, err := s.Store.GetDocument(r.Context(), userFrom(r).OrgID, idParam(r))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", doc.Mime)
@@ -574,30 +594,30 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getPageImage(w http.ResponseWriter, r *http.Request) {
 	doc, err := s.Store.GetDocument(r.Context(), userFrom(r).OrgID, idParam(r))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	page, _ := strconv.Atoi(chi.URLParam(r, "page"))
 	if page < 1 || (doc.PageCount > 0 && page > doc.PageCount) {
-		writeErr(w, http.StatusNotFound, "no such page")
+		writeErr(w, r, http.StatusNotFound, "no such page")
 		return
 	}
 	cache := s.previewPath(doc, page)
 	if _, err := os.Stat(cache); err != nil {
 		data, err := os.ReadFile(s.Pipeline.Path(doc.StorageKey))
 		if err != nil {
-			s.fail(w, err)
+			s.fail(w, r, err)
 			return
 		}
 		img, err := s.Pipeline.Local.Preview(r.Context(), doc.Filename, data, page)
 		if err != nil {
 			log.Printf("preview: %v", err)
-			writeErr(w, http.StatusBadGateway, "Could not render this page. Is the OCR worker running?")
+			writeErr(w, r, http.StatusBadGateway, "Could not render this page. Is the OCR worker running?")
 			return
 		}
 		os.MkdirAll(filepath.Dir(cache), 0o750)
 		if err := os.WriteFile(cache, img, 0o640); err != nil {
-			s.fail(w, err)
+			s.fail(w, r, err)
 			return
 		}
 	}
@@ -613,7 +633,7 @@ func (s *Server) previewPath(doc store.Document, page int) string {
 func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	doc, err := s.Store.DeleteDocument(r.Context(), userFrom(r).OrgID, idParam(r))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	os.Remove(s.Pipeline.Path(doc.StorageKey))
@@ -636,19 +656,19 @@ func (s *Server) reprocess(w http.ResponseWriter, r *http.Request) {
 	case "local", "auto":
 	case "claude":
 		if s.Agent == nil {
-			writeErr(w, http.StatusBadRequest, "Claude vision needs a Claude API key. Set ANTHROPIC_API_KEY and restart the server.")
+			writeErr(w, r, http.StatusBadRequest, "Claude vision needs a Claude API key. Set ANTHROPIC_API_KEY and restart the server.")
 			return
 		}
 	default:
-		writeErr(w, http.StatusBadRequest, "ocr must be local, claude or auto")
+		writeErr(w, r, http.StatusBadRequest, "ocr must be local, claude or auto")
 		return
 	}
 	if err := s.Store.Requeue(r.Context(), userFrom(r).OrgID, idParam(r), in.OCR); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, http.StatusConflict, "This document is still being processed.")
+			writeErr(w, r, http.StatusConflict, "This document is still being processed.")
 			return
 		}
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -657,7 +677,7 @@ func (s *Server) reprocess(w http.ResponseWriter, r *http.Request) {
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	hits, err := s.Store.SearchPages(r.Context(), userFrom(r).OrgID, r.URL.Query().Get("q"), r.URL.Query().Get("type"), 0, 20)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
@@ -669,7 +689,7 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	convs, err := s.Store.ListConversations(r.Context(), u.OrgID, u.ID)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversations": convs})
@@ -678,12 +698,12 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	if err := s.Store.ConversationOwned(r.Context(), u.OrgID, u.ID, idParam(r)); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	msgs, err := s.Store.ListMessages(r.Context(), idParam(r))
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
@@ -692,7 +712,7 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	if err := s.Store.DeleteConversation(r.Context(), u.OrgID, u.ID, idParam(r)); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -710,11 +730,11 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Message = strings.TrimSpace(in.Message)
 	if in.Message == "" {
-		writeErr(w, http.StatusBadRequest, "Type a question first.")
+		writeErr(w, r, http.StatusBadRequest, "Type a question first.")
 		return
 	}
 	if s.Agent == nil {
-		writeErr(w, http.StatusServiceUnavailable, "Asking questions needs a Claude API key. Set ANTHROPIC_API_KEY in .env and restart the server.")
+		writeErr(w, r, http.StatusServiceUnavailable, "Asking questions needs a Claude API key. Set ANTHROPIC_API_KEY in .env and restart the server.")
 		return
 	}
 	ctx := r.Context()
@@ -727,30 +747,30 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		conv, err := s.Store.CreateConversation(ctx, u.OrgID, u.ID, title)
 		if err != nil {
-			s.fail(w, err)
+			s.fail(w, r, err)
 			return
 		}
 		in.ConversationID = conv.ID
 	} else {
 		if err := s.Store.ConversationOwned(ctx, u.OrgID, u.ID, in.ConversationID); err != nil {
-			s.fail(w, err)
+			s.fail(w, r, err)
 			return
 		}
 		var err error
 		if history, err = s.Store.ListMessages(ctx, in.ConversationID); err != nil {
-			s.fail(w, err)
+			s.fail(w, r, err)
 			return
 		}
 	}
 	if err := s.Store.AddMessage(ctx, in.ConversationID, "user", in.Message, nil, nil); err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 
 	// Read before the stream starts so a database error can still be a normal HTTP error.
 	profile, err := s.Store.OrgProfile(ctx, u.OrgID)
 	if err != nil {
-		s.fail(w, err)
+		s.fail(w, r, err)
 		return
 	}
 
@@ -767,7 +787,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	send(map[string]any{"type": "conversation", "conversation_id": in.ConversationID})
 
-	res, err := s.Agent.Answer(ctx, u.OrgID, u.OrgName, profile, history, in.Message, func(e chat.Event) { send(e) })
+	lang := i18n.Lang(r)
+	res, err := s.Agent.Answer(ctx, lang, u.OrgID, u.OrgName, profile, history, in.Message, func(e chat.Event) { send(e) })
 	// Persist with a context that survives the client disconnecting mid-stream.
 	save := context.WithoutCancel(ctx)
 	if err != nil {
@@ -778,7 +799,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			// Keep roles alternating so the next turn's history is valid.
 			s.Store.AddMessage(save, in.ConversationID, "assistant", "(No answer: "+err.Error()+")", nil, nil)
 		}
-		send(chat.Event{Type: "error", Text: err.Error()})
+		send(chat.Event{Type: "error", Text: i18n.T(lang, err.Error())})
 		return
 	}
 	if res.Answer == "" {

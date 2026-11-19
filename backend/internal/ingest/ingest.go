@@ -87,10 +87,10 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 		fmt.Fprintf(&full, "--- page %d ---\n%s\n\n", pg.PageNo, pg.Text)
 	}
 	if strings.TrimSpace(joinText(pages)) == "" {
-		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "We could not find any text in this file. If it is a photo, try again in better light."))
+		return p.Store.FinishDocument(ctx, doc.ID, nil, appendNote(notice, "no_text"))
 	}
 	if p.Claude == nil {
-		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "This document can be searched. Summaries and key details are not switched on yet."))
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "no_summary"))
 	}
 
 	p.Store.SetStage(ctx, doc.ID, "analyzing")
@@ -103,7 +103,7 @@ func (p *Pipeline) run(ctx context.Context, doc store.Document) error {
 		// The text is already searchable; keep the document usable. The technical reason
 		// goes to the server log, the user sees a plain-language note.
 		log.Printf("ingest: document %d: metadata extraction failed: %v", doc.ID, err)
-		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "This document can be searched, but its summary and key details could not be created. Use Read again to retry."))
+		return p.finishWithGuess(ctx, doc, full.String(), appendNote(notice, "summary_failed"))
 	}
 	return p.Store.FinishDocument(ctx, doc.ID, analysis, notice)
 }
@@ -114,7 +114,7 @@ func (p *Pipeline) finishWithGuess(ctx context.Context, doc store.Document, text
 	if g == nil {
 		return p.Store.FinishDocument(ctx, doc.ID, nil, notice)
 	}
-	return p.Store.FinishDocument(ctx, doc.ID, g, appendNote(notice, "Its type was worked out from keywords, so check that it looks right."))
+	return p.Store.FinishDocument(ctx, doc.ID, g, appendNote(notice, "guessed"))
 }
 
 // ocr picks the engine: local first, Claude vision when requested or (in auto mode) when
@@ -139,7 +139,7 @@ func (p *Pipeline) ocr(ctx context.Context, doc store.Document, data []byte, mod
 	}
 	if lerr == nil && (!weak || !canEscalate) {
 		if weak && mode == "auto" {
-			notice = "Parts of this scan were hard to read. Check the text against the picture, or scan it again in better light."
+			notice = "hard_to_read"
 		}
 		c := res.Confidence
 		return res.Pages, res.Engine, &c, notice, nil
@@ -153,12 +153,12 @@ func (p *Pipeline) ocr(ctx context.Context, doc store.Document, data []byte, mod
 		}
 		log.Printf("ingest: document %d: Claude vision retry failed: %v", doc.ID, cerr)
 		c := res.Confidence
-		return res.Pages, res.Engine, &c, "Parts of this scan were hard to read. Check the text against the picture, or scan it again in better light.", nil
+		return res.Pages, res.Engine, &c, "hard_to_read", nil
 	}
 	if lerr != nil {
 		notice = ""
 	} else {
-		notice = "The first read was unclear, so this scan was read a second time more carefully."
+		notice = "read_twice"
 	}
 	return cpages, "claude-vision", nil, notice, nil
 }
@@ -187,6 +187,9 @@ func joinText(pages []store.Page) string {
 	return b.String()
 }
 
+// Notes on a document are stored as space-separated codes (no_text, no_summary,
+// summary_failed, guessed, hard_to_read, read_twice); the interface shows them in the
+// reader's language.
 func appendNote(a, b string) string {
 	if a == "" {
 		return b

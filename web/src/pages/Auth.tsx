@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
+import { LangSwitch, t } from '@/lib/i18n'
 import { useSession } from '@/lib/session'
 
 export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
@@ -29,7 +30,7 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       await refresh()
       navigate('/documents')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      setError(err instanceof Error ? err.message : t('auth.failed'))
     } finally {
       setBusy(false)
     }
@@ -48,47 +49,48 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
         <div className="text-base font-semibold tracking-tight">Doc Doctor</div>
         <div className="max-w-xl">
           <h1 className="font-serif text-[2.75rem] leading-[1.14] font-medium tracking-tight text-balance">
-            Ask your filing cabinet a question.
+            {t('auth.heroTitle')}
           </h1>
           {/* A worked example instead of a feature list: question, answer, the page it came from. */}
           <div className="mt-10 max-w-md">
-            <p className="font-serif text-lg leading-10 font-medium">When does the office lease end?</p>
+            <p className="font-serif text-lg leading-10 font-medium">{t('auth.heroQ')}</p>
             <p className="leading-10 text-muted-foreground">
-              On 28 February 2030, with six months&apos; notice.{' '}
-              <span className="marker text-sm font-medium text-foreground">p.2</span>
+              {t('auth.heroA')} <span className="marker px-[0.4em] text-xs font-semibold text-foreground">1</span>
             </p>
-            <p className="text-sm leading-10 text-muted-foreground">From Umowa najmu lokalu, scanned 14 Oct</p>
+            <p className="text-sm leading-10 text-muted-foreground">{t('auth.heroFrom')}</p>
           </div>
         </div>
         <p className="text-sm leading-10 text-muted-foreground">
-          Scans are read on your own server first. Nothing is sent to an AI model unless you turn that on.
+          {t('auth.heroFoot')}
         </p>
       </section>
 
       <section className="flex items-center justify-center px-6 py-12">
         <form onSubmit={submit} className="w-full max-w-sm">
-          <div className="mb-8 text-base font-semibold tracking-tight lg:hidden">Doc Doctor</div>
-          <h2 className="text-2xl font-semibold tracking-tight">{signUp ? 'Create your archive' : 'Sign in'}</h2>
+          <div className="mb-8 flex items-baseline justify-between">
+            <div className="text-base font-semibold tracking-tight lg:invisible">Doc Doctor</div>
+            <LangSwitch />
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">{signUp ? t('auth.create') : t('auth.signIn')}</h2>
           <p className="mt-1 mb-8 text-sm text-muted-foreground">
-            {signUp ? 'One workspace for your business documents.' : 'Open your document archive.'}
+            {signUp ? t('auth.createSub') : t('auth.signInSub')}
           </p>
 
           {linkExpired && (
             <p role="status" className="mb-6 border-l-2 border-stamp bg-card px-4 py-3 text-sm">
-              That phone code has expired or was already used. On your computer, open Scan with phone again for a new
-              code, or sign in here.
+              {t('auth.linkExpired')}
             </p>
           )}
 
           <div className="space-y-4">
             {signUp && (
               <div className="space-y-1.5">
-                <Label htmlFor="org">Business name</Label>
+                <Label htmlFor="org">{t('auth.org')}</Label>
                 <Input id="org" value={org} onChange={(e) => setOrg(e.target.value)} autoComplete="organization" required />
               </div>
             )}
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('auth.email')}</Label>
               <Input
                 id="email"
                 type="email"
@@ -99,7 +101,7 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('auth.password')}</Label>
               <Input
                 id="password"
                 type="password"
@@ -109,7 +111,7 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
                 minLength={signUp ? 8 : undefined}
                 required
               />
-              {signUp && <p className="text-xs text-muted-foreground">At least 8 characters.</p>}
+              {signUp && <p className="text-xs text-muted-foreground">{t('auth.passwordHint')}</p>}
             </div>
           </div>
 
@@ -120,15 +122,15 @@ export default function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           )}
 
           <Button type="submit" size="lg" className="mt-6 w-full" disabled={busy}>
-            {signUp ? 'Create archive' : 'Sign in'}
+            {signUp ? t('auth.createBtn') : t('auth.signIn')}
           </Button>
           <p className="mt-6 text-sm text-muted-foreground">
-            {signUp ? 'Already have an archive? ' : 'New here? '}
+            {signUp ? t('auth.haveArchive') : t('auth.newHere')}{' '}
             <Link
               to={signUp ? '/sign-in' : '/sign-up'}
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              {signUp ? 'Sign in' : 'Create an archive'}
+              {signUp ? t('auth.signIn') : t('auth.createLink')}
             </Link>
           </p>
         </form>

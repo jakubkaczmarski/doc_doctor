@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 
+	"docdoctor/internal/i18n"
 	"docdoctor/internal/llm"
 	"docdoctor/internal/store"
 )
@@ -125,6 +126,7 @@ const maxToolChars = 60_000
 
 type run struct {
 	a     *Agent
+	lang  string // interface language, for the progress lines shown while looking things up
 	orgID int64
 	seen  map[int64]string  // doc id -> title, for every document a tool returned
 	pages map[[2]int64]bool // (doc id, page) pairs whose text or metadata a tool returned
@@ -171,7 +173,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 			r.seen[h.DocID] = h.Title
 			r.pages[[2]int64{h.DocID, int64(h.Page)}] = true
 		}
-		return toJSON(map[string]any{"hits": hits}), "Searching for “" + in.Query + "”", nil
+		return toJSON(map[string]any{"hits": hits}), i18n.T(r.lang, "Searching for “%s”", in.Query), nil
 
 	case "read_document":
 		doc, err := r.a.Store.GetDocument(ctx, r.orgID, in.DocumentID)
@@ -197,7 +199,7 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 			fmt.Fprintf(&b, "=== page %d ===\n%s\n\n", p.PageNo, p.Text)
 		}
 		out["text"] = b.String()
-		return toJSON(out), "Reading “" + doc.Title + "”", nil
+		return toJSON(out), i18n.T(r.lang, "Reading “%s”", doc.Title), nil
 
 	case "list_documents":
 		filter.Limit = in.Limit
@@ -217,14 +219,14 @@ func (r *run) exec(ctx context.Context, name string, raw json.RawMessage) (resul
 				"total_amount": d.TotalAmount, "currency": d.Currency, "tags": d.Tags, "pages": d.PageCount, "summary": d.Summary,
 			})
 		}
-		return toJSON(map[string]any{"count": len(rows), "documents": rows}), "Listing documents", nil
+		return toJSON(map[string]any{"count": len(rows), "documents": rows}), i18n.T(r.lang, "Listing documents"), nil
 
 	case "aggregate_documents":
 		rows, err := r.a.Store.Aggregate(ctx, r.orgID, in.GroupBy, filter)
 		if err != nil {
 			return "", "", err
 		}
-		return toJSON(map[string]any{"group_by": in.GroupBy, "rows": rows}), "Adding up totals by " + in.GroupBy, nil
+		return toJSON(map[string]any{"group_by": in.GroupBy, "rows": rows}), i18n.T(r.lang, "Adding up totals"), nil
 	}
 	return "", "", fmt.Errorf("unknown tool %q", name)
 }
@@ -236,8 +238,11 @@ func toJSON(v any) string {
 
 // companyContext is the per-organisation part of the system prompt. It sits after the
 // cached instructions so editing the profile does not invalidate that cache entry.
-func companyContext(orgName, profile string) string {
+func companyContext(orgName, profile, lang string) string {
 	ctx := fmt.Sprintf("Company: %s. Today's date: %s.", orgName, time.Now().Format("2006-01-02"))
+	if lang == "pl" {
+		ctx += " The user has the app set to Polish: when a question is too short or mixed to tell its language, reply in Polish."
+	}
 	if strings.TrimSpace(profile) == "" {
 		return ctx + "\n\nThe owner has not written a business profile, so the archive is your only source."
 	}
@@ -249,7 +254,7 @@ var citeRe = regexp.MustCompile(`\[(\d+):(\d+)(?:\s*["“„]([^"”\]]{1,400})[
 
 // Answer runs one user turn. history holds the earlier turns as plain text. Text is
 // streamed through emit; the full answer and the sources it cites are returned.
-func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string, history []store.Message, question string, emit func(Event)) (Result, error) {
+func (a *Agent) Answer(ctx context.Context, lang string, orgID int64, orgName, profile string, history []store.Message, question string, emit func(Event)) (Result, error) {
 	var msgs []anthropic.BetaMessageParam
 	for _, m := range history {
 		block := anthropic.NewBetaTextBlock(m.Content)
@@ -263,7 +268,7 @@ func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string
 	}
 	msgs = append(msgs, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(question)))
 
-	r := &run{a: a, orgID: orgID, seen: map[int64]string{}, pages: map[[2]int64]bool{}, nums: newNumberIndex()}
+	r := &run{a: a, lang: lang, orgID: orgID, seen: map[int64]string{}, pages: map[[2]int64]bool{}, nums: newNumberIndex()}
 	// Figures the user typed or the owner put in the profile count as known, too.
 	r.nums.add(question)
 	r.nums.add(profile)
@@ -274,7 +279,7 @@ func (a *Agent) Answer(ctx context.Context, orgID int64, orgName, profile string
 	params.Tools = tools
 	params.System = []anthropic.BetaTextBlockParam{
 		{Text: systemPrompt, CacheControl: anthropic.NewBetaCacheControlEphemeralParam()},
-		{Text: companyContext(orgName, profile)},
+		{Text: companyContext(orgName, profile, lang)},
 	}
 
 	var answer strings.Builder

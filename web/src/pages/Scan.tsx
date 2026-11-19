@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
+import { t, tn } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
 type Shot = { id: number; file: File; url: string }
@@ -52,10 +53,10 @@ export default function ScanPage() {
 
   async function add(files: File[]) {
     const images = files.filter((f) => f.type.startsWith('image/') || /\.(heic|heif|tiff?)$/i.test(f.name))
-    if (images.length < files.length) toast.error('Only photos can be added here. Upload PDFs from Documents.')
+    if (images.length < files.length) toast.error(t('scan.onlyPhotos'))
     if (images.length === 0) return
     const room = MAX_PAGES - shots.length
-    if (images.length > room) toast.error(`A scan can have at most ${MAX_PAGES} pages.`)
+    if (images.length > room) toast.error(t('scan.max', { n: MAX_PAGES }))
     setAdding(true)
     const added: Shot[] = []
     for (const f of images.slice(0, room)) {
@@ -85,14 +86,14 @@ export default function ScanPage() {
       failed.forEach((r) => toast.error(`${r.filename}: ${r.error}`))
       if (failed.length === results.length) return
       const saved = results.filter((r) => r.document)
-      if (saved.every((r) => r.duplicate)) toast.info('This scan was already in the archive.')
-      else toast.success(saved.length === 1 ? 'Scan saved. Reading it now.' : `${saved.length} scans saved. Reading them now.`)
+      if (saved.every((r) => r.duplicate)) toast.info(t('scan.already'))
+      else toast.success(tn('scan.saved', saved.length))
       shots.forEach((s) => URL.revokeObjectURL(s.url))
       setShots([])
       setName('')
       navigate(saved.length === 1 ? `/documents/${saved[0].document!.id}` : '/documents')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not save the scan. Check your connection and try again.')
+      toast.error(err instanceof Error ? err.message : t('scan.saveErr'))
     } finally {
       setSaving(false)
     }
@@ -108,7 +109,7 @@ export default function ScanPage() {
         accept="image/*"
         capture="environment"
         className="sr-only"
-        aria-label="Take a photo of a page"
+        aria-label={t('scan.takeAria')}
         onChange={(e) => {
           void add(Array.from(e.target.files ?? []))
           e.target.value = ''
@@ -120,7 +121,7 @@ export default function ScanPage() {
         accept="image/*,.heic,.heif"
         multiple
         className="sr-only"
-        aria-label="Choose page photos"
+        aria-label={t('scan.chooseAria')}
         onChange={(e) => {
           void add(Array.from(e.target.files ?? []))
           e.target.value = ''
@@ -133,25 +134,25 @@ export default function ScanPage() {
     return (
       <div className="mx-auto flex min-h-full max-w-xl flex-col px-5 py-6 md:px-10 md:py-8">
         {inputs}
-        <h1 className="text-2xl font-semibold tracking-tight">Scan a document</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('scan.title')}</h1>
         <p className="mt-2 text-muted-foreground">
-          Photograph each page in order. The pages are saved as one document, read, and filed automatically.
+          {t('scan.intro')}
         </p>
 
         <div className="mt-6 flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed bg-card px-6 py-12 text-center md:flex-none">
           <Button size="lg" className="h-14 w-full max-w-xs text-base" onClick={() => camera.current?.click()} disabled={adding}>
             {adding ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Camera className="size-5" aria-hidden />}
-            Take photo of page 1
+            {t('scan.takeFirst')}
           </Button>
           <Button variant="ghost" className="mt-3" onClick={() => library.current?.click()} disabled={adding}>
-            <Images aria-hidden /> Choose from photos
+            <Images aria-hidden /> {t('scan.choose')}
           </Button>
         </div>
 
         <ul className="mt-6 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-          <li>Lay the page flat and fill the frame with it.</li>
-          <li>Avoid shadows and glare; daylight works best.</li>
-          <li>One page per photo.</li>
+          {['scan.tip1', 'scan.tip2', 'scan.tip3'].map((k) => (
+            <li key={k}>{t(k)}</li>
+          ))}
         </ul>
       </div>
     )
@@ -161,7 +162,7 @@ export default function ScanPage() {
     <div className="mx-auto flex min-h-full max-w-xl flex-col px-5 pt-6 md:px-10 md:pt-8">
       {inputs}
       <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">{n === 1 ? '1 page' : `${n} pages`}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{tn('pages', n)}</h1>
         <button
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
           onClick={() => {
@@ -169,20 +170,20 @@ export default function ScanPage() {
             setShots([])
           }}
         >
-          Start over
+          {t('scan.startOver')}
         </button>
       </div>
 
       <ol className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
         {shots.map((s, i) => (
           <li key={s.id} className="relative">
-            <img src={s.url} alt={`Page ${i + 1}`} className="aspect-[3/4] w-full border bg-white object-cover" />
+            <img src={s.url} alt={t('scan.pageAlt', { n: i + 1 })} className="aspect-[3/4] w-full border bg-white object-cover" />
             <span className="absolute bottom-1 left-1 rounded bg-ink/80 px-1.5 text-xs font-medium text-white tabular-nums">
               {i + 1}
             </span>
             <button
               onClick={() => remove(s.id)}
-              aria-label={`Remove page ${i + 1}`}
+              aria-label={t('scan.remove', { n: i + 1 })}
               className="absolute -top-2 -right-2 grid size-7 place-items-center rounded-full border bg-card text-muted-foreground shadow-sm hover:text-stamp"
             >
               <X className="size-4" />
@@ -198,7 +199,7 @@ export default function ScanPage() {
             >
               <span className="flex flex-col items-center gap-1">
                 {adding ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />}
-                Page {n + 1}
+                {t('scan.pageN', { n: n + 1 })}
               </span>
             </button>
           </li>
@@ -208,16 +209,16 @@ export default function ScanPage() {
         className="mt-3 self-start text-sm text-primary underline-offset-4 hover:underline"
         onClick={() => library.current?.click()}
       >
-        Add from photos
+        {t('scan.addFromPhotos')}
       </button>
 
       {n > 1 && (
         <fieldset className="mt-6">
-          <legend className="text-sm font-medium">These photos are</legend>
+          <legend className="text-sm font-medium">{t('scan.theseAre')}</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {[
-              { value: false, title: 'One document', hint: `${n} pages` },
-              { value: true, title: 'Separate documents', hint: `${n} documents` },
+              { value: false, title: t('scan.one'), hint: tn('pages', n) },
+              { value: true, title: t('scan.separate'), hint: tn('documents', n) },
             ].map((o) => (
               <label
                 key={String(o.value)}
@@ -243,12 +244,12 @@ export default function ScanPage() {
 
       {n > 1 && !separate && (
         <div className="mt-4 space-y-1.5">
-          <Label htmlFor="scan-name">Name (optional)</Label>
+          <Label htmlFor="scan-name">{t('scan.name')}</Label>
           <Input
             id="scan-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Left blank, it is named by date"
+            placeholder={t('scan.namePh')}
             maxLength={120}
             className="bg-card"
           />
@@ -258,7 +259,7 @@ export default function ScanPage() {
       <div className="sticky bottom-0 mt-auto bg-background pt-6 pb-4">
         <Button size="lg" className="h-12 w-full text-base" onClick={() => void save()} disabled={saving || adding}>
           {saving && <Loader2 className="size-5 animate-spin" aria-hidden />}
-          {saving ? 'Saving' : 'Save to archive'}
+          {saving ? t('scan.saving') : t('scan.save')}
         </Button>
       </div>
     </div>

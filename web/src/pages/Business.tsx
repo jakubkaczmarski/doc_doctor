@@ -4,13 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
-
-const EXAMPLE = `For example:
-
-We are an accounting office in Gdynia with 6 staff.
-Our legal name is Biuro Rachunkowe Łoś i Wspólnicy sp.j., NIP 586-102-33-47.
-Our fiscal year is the calendar year. We report amounts in PLN.
-"Żuraw" means our stationery supplier, Hurtownia Papiernicza Żuraw Sp. z o.o.`
+import { locale, t } from '@/lib/i18n'
 
 export default function BusinessPage() {
   const [name, setName] = useState('')
@@ -30,7 +24,7 @@ export default function BusinessPage() {
         setMax(o.max_chars)
         setLoaded(true)
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Could not load business info.'))
+      .catch((err) => toast.error(err instanceof Error ? err.message : t('biz.loadErr')))
   }, [])
 
   async function save() {
@@ -39,9 +33,9 @@ export default function BusinessPage() {
       const res = await api.saveOrg(profile)
       setProfile(res.profile)
       setSaved(res.profile)
-      toast.success('Business info saved.')
+      toast.success(t('biz.saved'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not save business info.')
+      toast.error(err instanceof Error ? err.message : t('biz.saveErr'))
     } finally {
       setBusy(false)
     }
@@ -51,45 +45,41 @@ export default function BusinessPage() {
 
   return (
     <div className="max-w-3xl px-5 py-6 md:px-10 md:py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Business info</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t('biz.title')}</h1>
       <p className="mt-2 max-w-[68ch] text-muted-foreground">
-        Facts about {name || 'your business'} that the assistant should know when it answers. It reads this text and
-        your uploaded documents, and nothing else.
+        {name ? t('biz.intro', { name }) : t('biz.introGeneric')}
       </p>
 
       <div className="mt-8 space-y-1.5">
-        <Label htmlFor="profile">What the assistant should know</Label>
+        <Label htmlFor="profile">{t('biz.label')}</Label>
         <Textarea
           id="profile"
           value={profile}
           onChange={(e) => setProfile(e.target.value)}
           disabled={!loaded}
           rows={12}
-          placeholder={EXAMPLE}
+          placeholder={t('biz.example')}
           className="min-h-64 bg-card leading-relaxed placeholder:text-muted-foreground/70"
           aria-describedby="profile-help"
         />
         <div id="profile-help" className="flex justify-between gap-4 text-xs text-muted-foreground">
-          <span>
-            Useful: legal name and tax ID, what you do, fiscal year, currency, nicknames for suppliers or clients.
-          </span>
+          <span>{t('biz.help')}</span>
           <span className={over ? 'font-medium text-stamp' : 'tabular-nums'}>
-            {profile.length.toLocaleString()} / {max.toLocaleString()}
+            {profile.length.toLocaleString(locale())} / {max.toLocaleString(locale())}
           </span>
         </div>
       </div>
 
       <Button className="mt-5" onClick={() => void save()} disabled={!loaded || busy || over || profile === saved}>
-        Save business info
+        {t('biz.save')}
       </Button>
 
       <section className="mt-12 border-t pt-6">
-        <h2 className="font-semibold">How answers are kept to your documents</h2>
+        <h2 className="font-semibold">{t('biz.howTitle')}</h2>
         <ul className="mt-3 max-w-[68ch] list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
-          <li>The assistant can only look in this archive. It cannot browse the internet or see another business.</li>
-          <li>It is instructed to answer from your documents and this page only, and to say so when they do not hold the answer.</li>
-          <li>Each fact has a yellow page marker. Tap it to see the page it came from. A marker that does not match a page it really read is flagged.</li>
-          <li>Numbers that are not written in the pages it read are listed under the answer, so worked-out or wrong numbers stand out.</li>
+          {['biz.how1', 'biz.how2', 'biz.how3', 'biz.how4'].map((k) => (
+            <li key={k}>{t(k)}</li>
+          ))}
         </ul>
       </section>
     </div>
